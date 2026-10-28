@@ -5,7 +5,7 @@
 Android-порт [veil-ios](https://github.com/The-Veil-Foundation/veil-ios) —
 Kotlin Multiplatform + Compose, Material 3 Expressive, одно ядро: Xray.
 
-**Статус:** альфа `0.2.0`. Проверено на живом Samsung Galaxy S20 FE (Android 14)
+**Статус:** альфа `0.1.0-alpha`. Проверено на живом Samsung Galaxy S20 FE (Android 14)
 с реальными подписками VLESS/REALITY.
 
 ---
@@ -147,9 +147,9 @@ Scripts/           скрипт сборки ядра
 
 `.github/workflows/release.yml` собирает APK при пуше тега `v*`:
 
-- `composeApp-arm64-v8a-release.apk` — телефоны;
-- `composeApp-x86_64-release.apk` — эмуляторы и x86-устройства;
-- `composeApp-universal-release.apk` — оба ABI в одном файле.
+- `veil-<версия>-arm64-v8a.apk` — телефоны;
+- `veil-<версия>-x86_64.apk` — эмуляторы и x86-устройства;
+- `veil-<версия>-universal.apk` — оба ABI в одном файле.
 
 Сплиты включаются флагом `-PabiSplits`, поэтому обычный `assembleDebug`
 по-прежнему собирает один APK. 32-битные ABI не собираются: ядро лежит только

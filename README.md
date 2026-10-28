@@ -5,7 +5,7 @@
 Android port of [veil-ios](https://github.com/The-Veil-Foundation/veil-ios) —
 Kotlin Multiplatform + Compose, Material 3 Expressive, a single core: Xray.
 
-**Status:** alpha `0.2.0`. Tested on a physical Samsung Galaxy S20 FE (Android 14)
+**Status:** alpha `0.1.0-alpha`. Tested on a physical Samsung Galaxy S20 FE (Android 14)
 with live VLESS/REALITY subscriptions.
 
 ---
@@ -147,9 +147,9 @@ truncated on every new connection.
 
 `.github/workflows/release.yml` builds APKs when a `v*` tag is pushed:
 
-- `composeApp-arm64-v8a-release.apk` — phones;
-- `composeApp-x86_64-release.apk` — emulators and x86 devices;
-- `composeApp-universal-release.apk` — both ABIs in one file.
+- `veil-<version>-arm64-v8a.apk` — phones;
+- `veil-<version>-x86_64.apk` — emulators and x86 devices;
+- `veil-<version>-universal.apk` — both ABIs in one file.
 
 ABI splits are enabled by `-PabiSplits`, so a plain `assembleDebug` still builds
 one APK. 32-bit ABIs are not built: the core ships only for `arm64-v8a` and

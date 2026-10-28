@@ -122,7 +122,7 @@ class DesktopLogProvider : LogProvider {
 
 /** На десктопе обновления не поддерживаются — только на Android. */
 class DesktopUpdateService : UpdateService {
-    override val currentVersion: String = "0.2.0"
+    override val currentVersion: String = "0.1.0-alpha"
     override suspend fun latest(): Result<AppRelease?> =
         Result.failure(UnsupportedOperationException("Обновления доступны только на Android"))
     override suspend fun download(release: AppRelease, onProgress: (Float) -> Unit): Result<String> =

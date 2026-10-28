@@ -82,15 +82,16 @@ cat ~/.local/veil/veil-release.b64 | xclip -selection clipboard   # или от�
 ## 5. Релиз
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.1.0-alpha
+git push origin v0.1.0-alpha
 ```
 
-Workflow `.github/workflows/release.yml` соберёт и приложит к релизу:
+Workflow `.github/workflows/release.yml` соберёт и приложит к релизу файлы
+с версией в имени:
 
-- `composeApp-arm64-v8a-release.apk`
-- `composeApp-x86_64-release.apk`
-- `composeApp-universal-release.apk`
+- `veil-0.1.0-alpha-arm64-v8a.apk`
+- `veil-0.1.0-alpha-x86_64.apk`
+- `veil-0.1.0-alpha-universal.apk`
 
 Приложение обновляется из последнего релиза: Настройки → «Проверить обновления».
 Важно: APK должны быть в ассетах релиза, а тег — вида `vX.Y.Z`.
