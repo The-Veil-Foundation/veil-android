@@ -1,0 +1,15 @@
+{
+  "java.configuration.runtimes": [
+    { "name": "JavaSE-21", "path": "/home/me/.local/jdk", "default": true }
+  ],
+  "files.exclude": {
+    "**/.gradle": true,
+    "**/build": true,
+    "**/.kotlin": true
+  },
+  "search.exclude": {
+    "**/build": true,
+    "**/.gradle": true
+  },
+  "kotlin.languageServer.enabled": true
+}

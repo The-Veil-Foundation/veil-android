@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- монета -->
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.16"
+        android:pathData="M54,28 A26,26 0 1,1 53.9,28 Z" />
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="1.6"
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1,1 53.9,28 Z" />
+    <!-- буква V -->
+    <path android:strokeColor="#452E7E" android:strokeWidth="5.4"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M44,44 L54,64 L64,44" />
+</vector>
