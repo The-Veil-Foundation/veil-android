@@ -27,7 +27,14 @@ jobs:
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
 
-      - name: Tests and debug build
+      - name: Toolchain info
         run: |
+          java -version
           chmod +x gradlew
-          ./gradlew :composeApp:desktopTest :composeApp:assembleDebug --no-daemon
+          ./gradlew --version
+
+      - name: Unit tests
+        run: ./gradlew :composeApp:desktopTest --no-daemon --stacktrace
+
+      - name: Debug APK
+        run: ./gradlew :composeApp:assembleDebug --no-daemon --stacktrace
