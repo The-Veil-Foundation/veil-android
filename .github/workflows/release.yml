@@ -21,20 +21,37 @@ jobs:
           java-version: '21'
 
       - name: Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "SDK: $SDK"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
 
       - name: Restore signing key
-        if: ${{ secrets.VEIL_KEYSTORE_BASE64 != '' }}
+        env:
+          KEY_B64: ${{ secrets.VEIL_KEYSTORE_BASE64 }}
+          KEY_PASSWORD: ${{ secrets.VEIL_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.VEIL_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.VEIL_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.VEIL_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/veil-release.jks"
-          {
-            echo "VEIL_KEYSTORE=$RUNNER_TEMP/veil-release.jks"
-            echo "VEIL_KEYSTORE_PASSWORD=${{ secrets.VEIL_KEYSTORE_PASSWORD }}"
-            echo "VEIL_KEY_ALIAS=${{ secrets.VEIL_KEY_ALIAS }}"
-            echo "VEIL_KEY_PASSWORD=${{ secrets.VEIL_KEY_PASSWORD }}"
-          } >> "$GITHUB_ENV"
+          set -euo pipefail
+          if [ -n "${KEY_B64:-}" ]; then
+            printf '%s' "$KEY_B64" | base64 -d > "$RUNNER_TEMP/veil-release.jks"
+            {
+              echo "VEIL_KEYSTORE=$RUNNER_TEMP/veil-release.jks"
+              echo "VEIL_KEYSTORE_PASSWORD=$KEY_PASSWORD"
+              echo "VEIL_KEY_ALIAS=$KEY_ALIAS"
+              echo "VEIL_KEY_PASSWORD=$KEY_PASS"
+            } >> "$GITHUB_ENV"
+            echo "Release key restored"
+          else
+            echo "No signing key secret: release will be debug-signed"
+          fi
 
-      - name: Build release APKs (arm64-v8a, x86_64, universal)
+      - name: Build release APKs
         run: |
           chmod +x gradlew
           ./gradlew :composeApp:assembleRelease -PabiSplits --no-daemon
