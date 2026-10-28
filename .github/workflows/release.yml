@@ -1,0 +1,47 @@
+name: Release APK
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build release APKs (arm64-v8a, x86_64, universal)
+        run: |
+          chmod +x gradlew
+          ./gradlew :composeApp:assembleRelease -PabiSplits --no-daemon
+        env:
+          VEIL_KEYSTORE: ${{ secrets.VEIL_KEYSTORE }}
+          VEIL_KEYSTORE_PASSWORD: ${{ secrets.VEIL_KEYSTORE_PASSWORD }}
+          VEIL_KEY_ALIAS: ${{ secrets.VEIL_KEY_ALIAS }}
+          VEIL_KEY_PASSWORD: ${{ secrets.VEIL_KEY_PASSWORD }}
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          find composeApp/build/outputs/apk/release -name '*.apk' -exec cp {} out/ \;
+          ls -lh out
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
+          generate_release_notes: true
+          draft: false

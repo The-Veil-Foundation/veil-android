@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -58,12 +59,22 @@ fun SettingsScreen(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        GroupTitle("Обновления")
+
+        SettingCard {
+            ActionRow(
+                title = "Проверить обновления",
+                subtitle = "Версия ${state.appVersion} · GitHub Releases",
+                onClick = { state.checkUpdates() },
+            )
+        }
+
         GroupTitle("Оформление")
 
         SettingCard {
             SwitchRow(
                 title = "Pitch Black",
-                subtitle = "Чистый чёрный фон вместо тёмно-серого: экономит OLED и не слепит ночью",
+                subtitle = "Чёрный фон для OLED",
                 checked = settings.pitchBlack,
                 onCheckedChange = { state.saveSettings(settings.copy(pitchBlack = it)) },
             )
@@ -74,19 +85,19 @@ fun SettingsScreen(
         SettingCard {
             ActionRow(
                 title = "Логи ядра",
-                subtitle = "Открыть, скопировать или очистить лог Xray",
+                subtitle = "Просмотр и копирование",
                 onClick = onOpenLogs,
             )
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
             ActionRow(
                 title = "Проверить соединение",
-                subtitle = "TCP-проверка выбранного узла прямо сейчас",
+                subtitle = "Проверить выбранный узел",
                 onClick = { state.checkConnection() },
             )
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
             ActionRow(
                 title = "О приложении",
-                subtitle = "Версия, ядро, число узлов и подписок",
+                subtitle = "Версия, ядро, исходники",
                 onClick = { showAbout = true },
             )
         }
@@ -97,7 +108,7 @@ fun SettingsScreen(
                 title = { Text("Veil", fontWeight = FontWeight.Black) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Версия 0.1.0", style = MaterialTheme.typography.bodyMedium)
+                        Text("Версия ${state.appVersion}", style = MaterialTheme.typography.bodyMedium)
                         Text(
                             "Ядро Xray ${status.coreVersion ?: state.coreVersion ?: "не подключено"}",
                             style = MaterialTheme.typography.bodyMedium,
@@ -115,6 +126,46 @@ fun SettingsScreen(
                 confirmButton = {
                     TextButton(onClick = { showAbout = false }) { Text("Закрыть") }
                 },
+                dismissButton = {
+                    TextButton(onClick = { state.openSource() }) { Text("Исходный код") }
+                },
+            )
+        }
+
+        state.update?.let { release ->
+            AlertDialog(
+                onDismissRequest = { state.dismissUpdate() },
+                title = { Text("Доступно ${release.version}", fontWeight = FontWeight.Black) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (release.notes.isNotBlank()) {
+                            Text(
+                                release.notes.lines().take(8).joinToString("\n"),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        val progress = state.updateProgress
+                        if (progress != null) {
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                "${(progress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { state.downloadUpdate() },
+                        enabled = state.updateProgress == null,
+                    ) { Text("Скачать и установить") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { state.dismissUpdate() }) { Text("Позже") }
+                },
             )
         }
 
@@ -124,7 +175,7 @@ fun SettingsScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("MTU", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text("Размер пакета в туннеле", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Размер пакета", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(1280, 1400, 1500).forEach { mtu ->
@@ -141,7 +192,7 @@ fun SettingsScreen(
 
             SwitchRow(
                 title = "IPv6 в туннеле",
-                subtitle = "Выключить — IPv6 пойдёт мимо VPN",
+                subtitle = "IPv6 пойдёт мимо VPN",
                 checked = settings.ipv6,
                 onCheckedChange = { state.saveSettings(settings.copy(ipv6 = it)) },
             )
@@ -167,7 +218,6 @@ fun SettingsScreen(
                 value = settings.userAgent,
                 onValueChange = { state.saveSettings(settings.copy(userAgent = it)) },
                 label = { Text("User-Agent подписки") },
-                supportingText = { Text("Панель выбирает формат по этому заголовку") },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -178,14 +228,14 @@ fun SettingsScreen(
         SettingCard {
             SwitchRow(
                 title = "Фрагментация TLS",
-                subtitle = "Дробит ClientHello на пакеты: DPI теряет SNI и не рвёт рукопожатие",
+                subtitle = "Обход DPI, дробление ClientHello",
                 checked = settings.fragment,
                 onCheckedChange = { state.saveSettings(settings.copy(fragment = it)) },
             )
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
             SwitchRow(
                 title = "Российские домены напрямую",
-                subtitle = "Домены .ru, .su и .рф идут мимо туннеля — банки и госуслуги не ломаются",
+                subtitle = ".ru, .su, .рф — мимо туннеля",
                 checked = settings.bypassRu,
                 onCheckedChange = { state.saveSettings(settings.copy(bypassRu = it)) },
             )

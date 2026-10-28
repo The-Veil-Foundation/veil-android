@@ -97,9 +97,28 @@ interface LogProvider {
     fun clear()
 }
 
+/** Релиз с GitHub, который можно поставить поверх текущей версии. */
+data class AppRelease(
+    val version: String,
+    val notes: String,
+    val downloadUrl: String,
+    val pageUrl: String,
+)
+
+/** Обновления по воздуху из GitHub Releases. */
+interface UpdateService {
+    val currentVersion: String
+    /** null — обновлений нет (или релизов ещё не публиковали). */
+    suspend fun latest(): Result<AppRelease?>
+    suspend fun download(release: AppRelease, onProgress: (Float) -> Unit): Result<String>
+    fun install(path: String): Result<Unit>
+    fun openSource(): Unit
+}
+
 interface AppContainer {
     val vpn: VpnController
     val logs: LogProvider
+    val update: UpdateService
     val store: ServerStore
     val settings: SettingsStore
     val geoDirectory: String

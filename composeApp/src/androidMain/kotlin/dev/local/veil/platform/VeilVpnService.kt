@@ -112,6 +112,67 @@ class VeilVpnService : VpnService() {
     private var geoDirectory: String = ""
     private var connectedAt: Long = 0L
 
+    /**
+     * Копия TUN-дескриптора для ядра. gVisor закрывает fd при остановке,
+     * поэтому мастер-дескриптор всегда остаётся у сервиса, а ядро получает dup.
+     */
+    private var coreFd: ParcelFileDescriptor? = null
+
+    /** Запускает ядро на дубликате TUN: перезапуск не убивает интерфейс. */
+    private fun startCore(configJson: String): Result<Unit> {
+        val master = tun ?: return Result.failure(IllegalStateException("TUN не создан"))
+        runCatching { coreFd?.close() }
+        val child = ParcelFileDescriptor.dup(master.fileDescriptor)
+        coreFd = child
+        return XrayBridge.start(configJson, child.fd, geoDirectory, 0)
+    }
+
+    /** Параметры TUN: нужны, чтобы пересоздать интерфейс при смене узла. */
+    private data class TunnelParams(
+        val mtu: Int,
+        val ipv6: Boolean,
+        val dns: List<String>,
+        val splitMode: SplitMode,
+        val splitPackages: Set<String>,
+    )
+
+    private var params: TunnelParams? = null
+
+    /**
+     * Создаёт TUN. При смене узла интерфейс пересоздаётся: ядро (gVisor)
+     * закрывает дескриптор при остановке, и старый fd больше не годится.
+     */
+    private fun openTun(params: TunnelParams): ParcelFileDescriptor? {
+        val builder = Builder()
+            .setSession("Veil")
+            .setMtu(params.mtu)
+            .addAddress("198.18.0.1", 24)
+            .addRoute("0.0.0.0", 0)
+
+        if (params.ipv6) {
+            builder.addAddress("fd6e:a81b:704f:1211::1", 64)
+            builder.addRoute("::", 0)
+        }
+
+        params.dns.forEach { builder.addDnsServer(it) }
+        runCatching { builder.addDisallowedApplication(packageName) }
+
+        when (params.splitMode) {
+            SplitMode.OFF -> Unit
+            SplitMode.EXCLUDE -> params.splitPackages.forEach { pkg ->
+                if (pkg != packageName) runCatching { builder.addDisallowedApplication(pkg) }
+            }
+            SplitMode.INCLUDE -> params.splitPackages.forEach { pkg ->
+                if (pkg != packageName) runCatching { builder.addAllowedApplication(pkg) }
+            }
+        }
+
+        return builder.establish()
+    }
+
+    /** Имя узла, к которому подключены сейчас: его показывает уведомление. */
+    private var activeServerName: String = ""
+
     /** Предыдущие счётчики — чтобы считать скорость в уведомлении. */
     private var lastDown = 0L
     private var lastUp = 0L
@@ -174,47 +235,24 @@ class VeilVpnService : VpnService() {
         }
 
         try {
-            val builder = Builder()
-                .setSession("Veil")
-                .setMtu(mtu)
-                .addAddress("198.18.0.1", 24)
-                .addRoute("0.0.0.0", 0)
+            val tunnelParams = TunnelParams(mtu, ipv6, dns, splitMode, splitPackages)
+            params = tunnelParams
 
-            if (ipv6) {
-                builder.addAddress("fd6e:a81b:704f:1211::1", 64)
-                builder.addRoute("::", 0)
-            }
-
-            dns.forEach { builder.addDnsServer(it) }
-
-            // Ядро живёт в нашем процессе: исключаем приложение из туннеля,
-            // иначе его сокеты до сервера уйдут в тот же TUN — петля.
-            runCatching { builder.addDisallowedApplication(packageName) }
-
-            when (splitMode) {
-                SplitMode.OFF -> Unit
-                SplitMode.EXCLUDE -> splitPackages.forEach { pkg ->
-                    if (pkg != packageName) runCatching { builder.addDisallowedApplication(pkg) }
-                }
-                SplitMode.INCLUDE -> splitPackages.forEach { pkg ->
-                    if (pkg != packageName) runCatching { builder.addAllowedApplication(pkg) }
-                }
-            }
-
-            val fd = builder.establish()
+            val fd = openTun(tunnelParams)
             if (fd == null) {
                 fail("Система не выдала TUN — нет разрешения VPN")
                 return
             }
             tun = fd
 
-            XrayBridge.start(configJson, fd.fd, geoDirectory, 0)
+            startCore(configJson)
                 .getOrElse {
                     fail("Xray не запустился: ${it.message}")
                     return
                 }
 
             connectedAt = System.currentTimeMillis()
+            activeServerName = serverName
             publish(
                 VpnStatus(
                     phase = VpnPhase.CONNECTED,
@@ -239,7 +277,21 @@ class VeilVpnService : VpnService() {
         publish(VpnStatus(VpnPhase.CONNECTING, serverName = serverName))
         try {
             XrayBridge.stop()
-            XrayBridge.start(configJson, fd.fd, geoDirectory, 0)
+            runCatching { coreFd?.close() }
+            coreFd = null
+            runCatching { tun?.close() }
+            tun = null
+
+            // Свежий TUN: ядро закрыло дескриптор при остановке, старый уже мёртв.
+            val tunnelParams = params
+            val fresh = tunnelParams?.let { openTun(it) }
+            if (fresh == null) {
+                fail("Не удалось пересоздать TUN при смене узла")
+                return
+            }
+            tun = fresh
+
+            startCore(configJson)
                 .getOrElse {
                     fail("Перезапуск ядра не удался: ${it.message}")
                     return
@@ -247,6 +299,7 @@ class VeilVpnService : VpnService() {
             // Время сессии не обнуляем: смена узла не должна выглядеть
             // как новое подключение.
             if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
+            activeServerName = serverName
             lastTick = 0L
             publish(
                 VpnStatus(
@@ -274,7 +327,7 @@ class VeilVpnService : VpnService() {
         }
         notificationJob = serviceScope.launch {
             while (isActive) {
-                notify(serverName, live = true)
+                notify(activeServerName.ifEmpty { serverName }, live = true)
                 delay(1000)
             }
         }
@@ -284,6 +337,8 @@ class VeilVpnService : VpnService() {
         notificationJob?.cancel()
         notificationJob = null
         runCatching { XrayBridge.stop() }
+        runCatching { coreFd?.close() }
+        coreFd = null
         runCatching { tun?.close() }
         tun = null
         if (resetStatus) {

@@ -64,8 +64,8 @@ android {
         applicationId = "dev.local.veil"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
@@ -76,9 +76,38 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
 
+    signingConfigs {
+        create("release") {
+            // В CI ключ приходит секретами; локально релиз подписывается debug-ключом.
+            val store = System.getenv("VEIL_KEYSTORE")
+            if (!store.isNullOrBlank()) {
+                storeFile = file(store)
+                storePassword = System.getenv("VEIL_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("VEIL_KEY_ALIAS")
+                keyPassword = System.getenv("VEIL_KEY_PASSWORD")
+            }
+        }
+    }
+
+    // Сплиты по ABI включаются только для релиза: -PabiSplits.
+    // Ядро собрано под arm64-v8a и x86_64, поэтому 32-битные сборки не делаем.
+    splits {
+        abi {
+            isEnable = providers.gradleProperty("abiSplits").isPresent
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = if (!System.getenv("VEIL_KEYSTORE").isNullOrBlank()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 

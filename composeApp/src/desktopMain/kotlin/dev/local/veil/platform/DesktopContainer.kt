@@ -120,10 +120,23 @@ class DesktopLogProvider : LogProvider {
     }
 }
 
+/** На десктопе обновления не поддерживаются — только на Android. */
+class DesktopUpdateService : UpdateService {
+    override val currentVersion: String = "0.2.0"
+    override suspend fun latest(): Result<AppRelease?> =
+        Result.failure(UnsupportedOperationException("Обновления доступны только на Android"))
+    override suspend fun download(release: AppRelease, onProgress: (Float) -> Unit): Result<String> =
+        Result.failure(UnsupportedOperationException("Обновления доступны только на Android"))
+    override fun install(path: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Обновления доступны только на Android"))
+    override fun openSource() = Unit
+}
+
 class DesktopContainer : AppContainer {
     override val store: ServerStore = DesktopServerStore()
     override val vpn: VpnController = DesktopVpnController()
     override val logs: LogProvider = DesktopLogProvider()
+    override val update: UpdateService = DesktopUpdateService()
     override val geoDirectory: String =
         File(System.getProperty("user.home"), ".veil/geo").apply { mkdirs() }.absolutePath
     override val subscriptions: SubscriptionFetcher = DesktopSubscriptionFetcher()

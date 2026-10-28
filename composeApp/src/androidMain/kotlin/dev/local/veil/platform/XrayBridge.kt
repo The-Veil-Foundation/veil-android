@@ -58,6 +58,26 @@ object XrayBridge {
         }.onFailure { Log.w(TAG, "prepareLog failed", it) }
     }
 
+    /**
+     * Второй экземпляр ядра для проверки узла. Основной туннель при этом
+     * продолжает работать — переключение сервера больше не рвёт соединения.
+     */
+    fun startProbe(configJson: String, assetDir: String): Result<Unit> = runCatching {
+        val c = clazz ?: error("xray.aar не подключён")
+        val method = c.methods.firstOrNull { it.name == "startProbe" && it.parameterTypes.size == 2 }
+            ?: error("xray.Xray.startProbe не найден — пересоберите xray.aar")
+        try {
+            method.invoke(null, configJson, assetDir)
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            throw e.targetException ?: e
+        }
+    }
+
+    fun stopProbe() {
+        runCatching { clazz?.getMethod("stopProbe")?.invoke(null) }
+            .onFailure { Log.w(TAG, "stopProbe failed", it) }
+    }
+
     fun checkConfig(configJson: String): Result<Unit> = runCatching {
         val c = clazz ?: error("xray.aar не подключён")
         c.getMethod("checkConfig", String::class.java).invoke(null, configJson)

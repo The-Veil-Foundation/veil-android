@@ -51,6 +51,13 @@ class VeilState(
     /** Какой узел проверяем — для подписи в статус-карточке. */
     var checkingServer by mutableStateOf<ProxyConfig?>(null)
         private set
+    /** Доступное обновление и прогресс его загрузки. */
+    var update by mutableStateOf<dev.local.veil.platform.AppRelease?>(null)
+        private set
+    var updateProgress by mutableStateOf<Float?>(null)
+        private set
+    val appVersion: String get() = container.update.currentVersion
+
     /** Всплывающее сообщение внизу экрана (тост-буллетин). */
     var bulletin by mutableStateOf<Bulletin?>(null)
         private set
@@ -81,7 +88,9 @@ class VeilState(
             if (switchJob?.isActive == true) return
             switchJob = scope.launch {
                 val options = settings.toTunnelOptions()
-                val target = pickReachableNode(server)
+                // Полная проверка идёт во втором экземпляре ядра, поэтому
+                // рабочий туннель и Телеграм не замечают её.
+                val target = pickWorkingNode(server, options)
                 if (target == null) {
                     // Ни один узел не подтвердился — возвращаемся на прежний,
                     // чтобы не оставить пользователя с пустым туннелем.
@@ -385,54 +394,6 @@ class VeilState(
     }
 
     /**
-     * Быстрая проверка при переключении уже поднятого туннеля.
-     *
-     * Полная проба здесь не годится: она останавливает ядро, и Телеграм
-     * сбрасывает соединения. Поэтому проверяем только TCP-доступность узла
-     * (сокет идёт мимо туннеля, приложение исключено из VPN) — это 0,1–2 с,
-     * туннель всё это время продолжает работать.
-     */
-    private suspend fun pickReachableNode(server: ProxyConfig): ProxyConfig? {
-        suspend fun reachable(candidate: ProxyConfig): Int? = withContext(Dispatchers.IO) {
-            container.pinger.ping(candidate, timeoutMs = 2000)
-        }
-
-        checking = true
-        checkingServer = server
-        val first = try {
-            reachable(server)
-        } finally {
-            checking = false
-            checkingServer = null
-        }
-
-        if (first != null) {
-            pings = pings + (server.id to first)
-            return server
-        }
-        pings = pings + (server.id to null)
-
-        val alternatives = servers
-            .filter { it.id != server.id && it.isUsable && it.source == server.source }
-            .sortedBy { pings[it.id] ?: Int.MAX_VALUE }
-            .take(5)
-
-        for (alternative in alternatives) {
-            checking = true
-            checkingServer = alternative
-            val value = try {
-                reachable(alternative)
-            } finally {
-                checking = false
-                checkingServer = null
-            }
-            pings = pings + (alternative.id to value)
-            if (value != null) return alternative
-        }
-        return null
-    }
-
-    /**
      * Проверяет выбранный узел, а если он мёртв — перебирает быстрые
      * альтернативы из той же подписки (сначала с наименьшим пингом).
      */
@@ -488,6 +449,56 @@ class VeilState(
             }
         }
     }
+
+    /* ---------------- обновления ---------------- */
+
+    fun checkUpdates() {
+        scope.launch {
+            updateProgress = null
+            container.update.latest()
+                .onSuccess { release ->
+                    if (release == null) {
+                        showBulletin("Обновлений нет · версия ${appVersion}", BulletinKind.SUCCESS)
+                    } else {
+                        update = release
+                    }
+                }
+                .onFailure {
+                    val text = it.message ?: "Не удалось проверить обновления"
+                    // Отсутствие релизов — не ошибка, а факт.
+                    val kind = if (text.contains("Релизов")) BulletinKind.INFO else BulletinKind.ERROR
+                    showBulletin(text, kind)
+                }
+        }
+    }
+
+    fun downloadUpdate() {
+        val release = update ?: return
+        scope.launch {
+            updateProgress = 0f
+            container.update.download(release) { percent ->
+                updateProgress = percent
+            }
+                .onSuccess { path ->
+                    updateProgress = null
+                    update = null
+                    container.update.install(path)
+                        .onSuccess { showBulletin("Открываю установщик Android", BulletinKind.INFO) }
+                        .onFailure { showBulletin(it.message ?: "Не удалось запустить установку", BulletinKind.ERROR) }
+                }
+                .onFailure {
+                    updateProgress = null
+                    showBulletin(it.message ?: "Не удалось скачать обновление", BulletinKind.ERROR)
+                }
+        }
+    }
+
+    fun dismissUpdate() {
+        update = null
+        updateProgress = null
+    }
+
+    fun openSource() = container.update.openSource()
 
     fun removeServer(id: String) {
         servers = servers.filterNot { it.id == id }

@@ -73,11 +73,6 @@ fun SubscriptionsScreen(
                     }
                 }
             }
-            Text(
-                text = "HWID отправляется автоматически: панели вроде Remnawave без него отдают заглушку.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
 
         LazyColumn(

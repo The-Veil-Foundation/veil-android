@@ -70,6 +70,9 @@ class AndroidVpnController(
             if (!server.isUsable) error("Протокол ${server.proto.wire} не поддерживается Xray")
             if (!ensurePermission()) error("Разрешение на VPN не выдано")
 
+            // Каждая новая сессия начинается с чистого лога.
+            if (logFile.isNotEmpty()) XrayBridge.prepareLog(logFile)
+
             val settings = settingsStore.load()
             VeilVpnService.start(
                 context = activity.applicationContext,
@@ -86,28 +89,27 @@ class AndroidVpnController(
     override suspend fun probe(server: ProxyConfig, options: TunnelOptions): Boolean =
         withContext(Dispatchers.IO) {
             if (!coreAvailable) return@withContext false
-            // При смене узла на лету ядро уже запущено: на время проверки его
-            // надо освободить, иначе второй экземпляр не поднимется.
-            if (XrayBridge.isRunning) XrayBridge.stop()
-            val effective = if (logFile.isNotEmpty()) options.copy(logFile = logFile) else options
+            // Пробное ядро пишет в отдельный файл: два экземпляра в одном
+            // файле мешали бы друг другу.
+            val probeLog = logFile.takeIf { it.isNotEmpty() }?.let { "$it.probe" }
+            val effective = options.copy(logFile = probeLog, logLevel = "debug")
             val port = 21000 + (System.nanoTime() % 500).toInt()
             val config = resolveEndpoints(
                 XrayConfig.json(server, effective, XrayInbound.LocalProxy(socks = port, http = port + 1)),
                 dump = false,
             )
             try {
-                XrayBridge.start(
-                    // Реального TUN тут нет: конфиг собран с SOCKS-инбаундом,
-                    // поэтому дескриптор не используется (нужен только как > 0).
-                    configJson = config,
-                    tunFd = 1,
-                    assetDir = geoDirectory,
-                    maxMemoryMb = 0,
-                ).getOrElse { return@withContext false }
+                // Проверка идёт во втором экземпляре ядра: рабочий туннель
+                // продолжает жить, соединения не рвутся.
+                XrayBridge.startProbe(config, geoDirectory)
+                    .onFailure { android.util.Log.w("VeilXray", "пробное ядро не поднялось: ${it.message}") }
+                    .getOrElse { return@withContext false }
 
-                probeThroughSocks(port)
+                // Один редкий обрыв не должен отменять переключение:
+                // вторая попытка идёт по свежему соединению.
+                probeThroughSocks(port) || probeThroughSocks(port)
             } finally {
-                runCatching { XrayBridge.stop() }
+                runCatching { XrayBridge.stopProbe() }
             }
         }
 
@@ -303,6 +305,7 @@ class AndroidContainer(activity: ComponentActivity) : AppContainer {
     override val settings: SettingsStore = AndroidSettingsStore(activity.applicationContext)
     override val vpn: VpnController = AndroidVpnController(activity, geoDir, logPath, settings)
     override val logs: LogProvider = AndroidLogProvider(java.io.File(logPath))
+    override val update: UpdateService = AndroidUpdateService(activity.applicationContext)
     override val geoDirectory: String = geoDir
     override val subscriptions: SubscriptionFetcher = AndroidSubscriptionFetcher(activity.applicationContext)
     override val packages: PackageLister = AndroidPackageLister(activity.applicationContext)

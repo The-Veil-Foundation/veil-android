@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/composeApp/libs/xray.aar"
-BRIDGE="${XRAY_BRIDGE:-$ROOT/../veil-ios-main/XrayBridge}"
+# Мост живёт в репозитории, чтобы релиз собирался на GitHub без соседних папок.
+BRIDGE="${XRAY_BRIDGE:-$ROOT/XrayBridge}"
 
 export ANDROID_HOME="$HOME/Android"
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$HOME/Android/ndk/29.0.14206865}"

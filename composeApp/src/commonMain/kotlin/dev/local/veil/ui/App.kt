@@ -374,7 +374,7 @@ private fun AddSheet(
         }
 
         Text(
-            text = "Подписка скачивается нативно с X-Hwid. Поддерживаются ссылки, base64 и массивы Xray-конфигов.",
+            text = "Ссылка, base64 или конфиг Xray.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
