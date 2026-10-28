@@ -5,7 +5,7 @@
 Android port of [veil-ios](https://github.com/The-Veil-Foundation/veil-ios) —
 Kotlin Multiplatform + Compose, Material 3 Expressive, a single core: Xray.
 
-**Status:** alpha `0.1.0-alpha`. Tested on a physical Samsung Galaxy S20 FE (Android 14)
+**Status:** alpha `0.1.0-alpha`. Tested on a physical Samsung Galaxy S20 FE (Android 16)
 with live VLESS/REALITY subscriptions.
 
 ---
