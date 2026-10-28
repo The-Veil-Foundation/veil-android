@@ -28,14 +28,12 @@ ssh -T git@github.com
 
 ## 2. Репозиторий
 
-Создать пустой репозиторий `The-Veil-Foundation/veil-android` (без README и .gitignore).
-Если репозиторий будет под личным аккаунтом, а не под организацией, поменять remote
-и адреса в коде:
+Создать пустой репозиторий `s4ntiksu/veil-android` (без README и .gitignore).
+Remote и адреса в коде уже указывают на этот аккаунт:
 
 ```bash
-git remote set-url origin git@github.com:<аккаунт>/veil-android.git
-# плюс заменить The-Veil-Foundation на <аккаунт> в:
-#   composeApp/src/androidMain/.../AndroidUpdateService.kt  (API и SOURCE_URL)
+git remote -v
+# origin  git@github.com:s4ntiksu/veil-android.git
 ```
 
 ## 3. Первый пуш
