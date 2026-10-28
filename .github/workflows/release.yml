@@ -23,15 +23,21 @@ jobs:
       - name: Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Restore signing key
+        if: ${{ secrets.VEIL_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.VEIL_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/veil-release.jks"
+          {
+            echo "VEIL_KEYSTORE=$RUNNER_TEMP/veil-release.jks"
+            echo "VEIL_KEYSTORE_PASSWORD=${{ secrets.VEIL_KEYSTORE_PASSWORD }}"
+            echo "VEIL_KEY_ALIAS=${{ secrets.VEIL_KEY_ALIAS }}"
+            echo "VEIL_KEY_PASSWORD=${{ secrets.VEIL_KEY_PASSWORD }}"
+          } >> "$GITHUB_ENV"
+
       - name: Build release APKs (arm64-v8a, x86_64, universal)
         run: |
           chmod +x gradlew
           ./gradlew :composeApp:assembleRelease -PabiSplits --no-daemon
-        env:
-          VEIL_KEYSTORE: ${{ secrets.VEIL_KEYSTORE }}
-          VEIL_KEYSTORE_PASSWORD: ${{ secrets.VEIL_KEYSTORE_PASSWORD }}
-          VEIL_KEY_ALIAS: ${{ secrets.VEIL_KEY_ALIAS }}
-          VEIL_KEY_PASSWORD: ${{ secrets.VEIL_KEY_PASSWORD }}
 
       - name: Collect APKs
         run: |

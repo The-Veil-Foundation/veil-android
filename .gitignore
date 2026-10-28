@@ -7,3 +7,7 @@ local.properties
 *.iml
 .DS_Store
 captures/
+*.jks
+*.keystore
+*.b64
+keys/
