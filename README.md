@@ -178,8 +178,8 @@ generation (fragmentation mask, RU bypass rules, subscription formats).
 
 ## License
 
-The original project is AGPLv3, and the port inherits it. Xray-core is MPL-2.0,
-which is compatible with AGPLv3, but any distributed build must be accompanied by
-the source.
+The original project is AGPLv3, and the port inherits it — see [LICENSE](LICENSE).
+Xray-core is MPL-2.0, which is compatible with AGPLv3, but any distributed build
+must be accompanied by the source.
 
 Repository: https://github.com/The-Veil-Foundation/veil-android
