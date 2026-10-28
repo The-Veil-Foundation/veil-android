@@ -81,20 +81,29 @@ cat ~/.local/veil/veil-release.b64 | xclip -selection clipboard   # или от�
 
 ## 5. Релиз
 
-```bash
-git tag v0.1.0-alpha
-git push origin v0.1.0-alpha
+Автоматических сборок нет: ни на push, ни на тег. Сборка запускается только
+вручную.
+
+1. Поднять версию в `composeApp/build.gradle.kts`:
+
+```kotlin
+versionCode = 3          // всегда больше предыдущего
+versionName = "0.1.1"    // тег будет v0.1.1
 ```
 
-Workflow `.github/workflows/release.yml` соберёт и приложит к релизу файлы
-с версией в имени:
+2. Закоммитить и запушить `main`.
+3. GitHub → **Actions** → **Release** → **Run workflow** → в поле `tag` ввести
+   `v0.1.1` (должен совпадать с `versionName` без `v`, иначе job упадёт на шаге
+   «Check versions match»). При желании включить `draft`.
+4. Через несколько минут в Releases появятся:
 
-- `veil-0.1.0-alpha-arm64-v8a.apk`
-- `veil-0.1.0-alpha-x86_64.apk`
-- `veil-0.1.0-alpha-universal.apk`
+- `veil-0.1.1-arm64-v8a.apk`
+- `veil-0.1.1-x86_64.apk`
+- `veil-0.1.1-universal.apk`
 
-Приложение обновляется из последнего релиза: Настройки → «Проверить обновления».
-Важно: APK должны быть в ассетах релиза, а тег — вида `vX.Y.Z`.
+Тег можно не пушить вручную: GitHub создаст его сам при публикации релиза.
+
+Чтобы проверить сборку без релиза: **Actions** → **CI** → **Run workflow**.
 
 ## 6. Локальная сборка релиза
 

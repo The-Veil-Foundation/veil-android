@@ -145,7 +145,9 @@ truncated on every new connection.
 
 ## Releases and updates
 
-`.github/workflows/release.yml` builds APKs when a `v*` tag is pushed:
+Releases are built **manually**: Actions → *Release* → *Run workflow*, enter the
+tag (e.g. `v0.1.1`, it must match `versionName`). Nothing is built on push or on
+tags, so no CI minutes are spent by accident. The outputs are:
 
 - `veil-<version>-arm64-v8a.apk` — phones;
 - `veil-<version>-x86_64.apk` — emulators and x86 devices;
@@ -163,7 +165,7 @@ The app checks `releases/latest` of this repository (Settings → Check for
 updates), so releases must be published here with the APK assets attached.
 
 Step-by-step publishing instructions: [`docs/release.md`](docs/release.md)
-(Russian).
+(Russian). A build-only check runs the same way: Actions → *CI* → *Run workflow*.
 
 ---
 

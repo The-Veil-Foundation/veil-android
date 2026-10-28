@@ -1,16 +1,30 @@
 name: Release
 
+# Только ручной запуск: Actions → Release → Run workflow.
+# Вводится тег (например v0.1.1), он же становится именем релиза.
+# Никаких сборок на push — минуты не тратятся.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (v0.1.1)'
+        required: true
+      draft:
+        description: 'Create as draft'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   android:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +43,19 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+
+      - name: Check versions match
+        run: |
+          set -euo pipefail
+          GRADLE_VERSION="$(grep -m1 'versionName =' composeApp/build.gradle.kts | cut -d'"' -f2)"
+          TAG_VERSION="${{ inputs.tag }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          echo "versionName: $GRADLE_VERSION"
+          echo "tag:         $TAG_VERSION"
+          if [ "$GRADLE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::versionName ($GRADLE_VERSION) не совпадает с тегом ($TAG_VERSION). Обнови versionName в composeApp/build.gradle.kts."
+            exit 1
+          fi
 
       - name: Restore signing key
         env:
@@ -59,7 +86,8 @@ jobs:
       - name: Collect APKs
         run: |
           set -euo pipefail
-          VERSION="$(grep -m1 'versionName =' composeApp/build.gradle.kts | cut -d'"' -f2)"
+          VERSION="${{ inputs.tag }}"
+          VERSION="${VERSION#v}"
           mkdir -p out
           SRC=composeApp/build/outputs/apk/release
           cp "$SRC/composeApp-arm64-v8a-release.apk"  "out/veil-$VERSION-arm64-v8a.apk"
@@ -70,6 +98,8 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
           files: out/*.apk
           generate_release_notes: true
-          draft: false
+          draft: ${{ inputs.draft }}
