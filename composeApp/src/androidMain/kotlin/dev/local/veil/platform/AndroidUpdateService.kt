@@ -179,7 +179,7 @@ class AndroidUpdateService(private val context: Context) : UpdateService {
     )
 
     private companion object {
-        const val API = "https://api.github.com/repos/s4ntiksu/veil-android/releases"
-        const val SOURCE_URL = "https://github.com/s4ntiksu/veil-android"
+        const val API = "https://api.github.com/repos/The-Veil-Foundation/veil-android/releases"
+        const val SOURCE_URL = "https://github.com/The-Veil-Foundation/veil-android"
     }
 }

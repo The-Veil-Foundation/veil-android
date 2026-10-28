@@ -127,7 +127,7 @@ composeApp/src/
 - Кнопки диагностики в настройках: «Логи ядра», «Проверить соединение».
 - Обновления по воздуху из GitHub Releases: проверка версии, скачивание APK,
   установка через системный установщик (FileProvider).
-- Ссылка на исходники: https://github.com/s4ntiksu/veil-android
+- Ссылка на исходники: https://github.com/The-Veil-Foundation/veil-android
 
 ## Сборка
 

@@ -28,13 +28,20 @@ ssh -T git@github.com
 
 ## 2. Репозиторий
 
-Создать пустой репозиторий `s4ntiksu/veil-android` (без README и .gitignore).
-Remote и адреса в коде уже указывают на этот аккаунт:
+Создать пустой репозиторий в организации `The-Veil-Foundation`:
+https://github.com/organizations/The-Veil-Foundation/repositories/new
+(имя `veil-android`, без README и .gitignore).
+
+Remote и адреса в коде уже указывают на организацию:
 
 ```bash
 git remote -v
-# origin  git@github.com:s4ntiksu/veil-android.git
+# origin  git@github.com:The-Veil-Foundation/veil-android.git
 ```
+
+Если аккаунт `s4ntiksu` не может писать в организацию, ключ можно добавить
+прямо в репозиторий: Settings → Deploy keys → Add deploy key → вставить
+публичный ключ и включить «Allow write access».
 
 ## 3. Первый пуш
 
