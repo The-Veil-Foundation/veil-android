@@ -133,3 +133,9 @@ gVisor закрывает переданный TUN-дескриптор при �
 Проверять узел тоже нельзя останавливая рабочий туннель: второй экземпляр ядра
 (`startProbe` в Go-мосте) поднимается с локальным SOCKS-инбаундом, проверяет
 узел HTTPS-запросом и закрывается, не трогая основной туннель.
+
+### Mihomo / Clash
+`MihomoParser` разбирает секцию `proxies:` Clash-профиля: vless, vmess, trojan,
+shadowsocks, ws/grpc/http, TLS, REALITY и xhttp. Hysteria2/TUIC/AnyTLS
+пропускаются (нужен sing-box). `proxy-groups` и `rules` пока не импортируются —
+узлы добавляются плоско, как обычные серверы.

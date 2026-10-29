@@ -32,7 +32,7 @@ gomobile bind \
   -target=android/arm64,android/amd64 \
   -androidapi 24 \
   -o "$OUT" \
-  -ldflags="-s -w" \
+  -ldflags="-s -w -checklinkname=0" \
   -trimpath \
   .
 ls -lh "$OUT"

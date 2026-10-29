@@ -101,6 +101,15 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Если задан релизный ключ, debug-сборка подписывается им же:
+            // иначе её нельзя поставить поверх релизного APK.
+            signingConfig = if (!System.getenv("VEIL_KEYSTORE").isNullOrBlank()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
         release {
             isMinifyEnabled = false
             signingConfig = if (!System.getenv("VEIL_KEYSTORE").isNullOrBlank()) {

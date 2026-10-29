@@ -17,8 +17,9 @@ VMess, Trojan, Shadowsocks, WireGuard. Hysteria2, TUIC and AnyTLS links are
 recognised but marked unusable: they need sing-box while this build is
 deliberately Xray-only.
 
-**Subscriptions** — plain share links, base64 lists and ready-made Xray config
-arrays. Manual refresh, per-group refresh, optional scheduled refresh. The
+**Subscriptions** — plain share links, base64 lists, ready-made Xray config
+arrays and Mihomo/Clash YAML (`proxies:` imported as nodes; groups and rules are
+not used yet). Manual refresh, per-group refresh, optional scheduled refresh. The
 `subscription-userinfo` response header is parsed, so the subscription card shows
 traffic used and the expiry date.
 
@@ -87,9 +88,9 @@ descriptor: gVisor closes the fd when the core stops, so reusing it would leave 
 | Go bridge | `XrayBridge/xray.go` | reused, plus a probe instance |
 | UI | `App/Views/*` | servers, subscriptions, settings, split tunnel, logs |
 
-Not ported yet: `urltest` balancer groups and manual selectors, Mihomo/Clash YAML
-import, routing rules editor, DNS editor (fake IP, detours), config inspector and
-secret redaction, localization tables.
+Not ported yet: `urltest` balancer groups and manual selectors (Mihomo groups),
+routing rules editor, DNS editor (fake IP, detours), config inspector and secret
+redaction, localization tables.
 
 ---
 
@@ -171,8 +172,8 @@ Step-by-step publishing instructions: [`docs/release.md`](docs/release.md)
 
 ## Tests
 
-`./gradlew :composeApp:desktopTest` — 25 tests covering link parsing and config
-generation (fragmentation mask, RU bypass rules, subscription formats).
+`./gradlew :composeApp:desktopTest` — 28 tests covering link parsing, config
+generation (fragmentation mask, RU bypass rules) and Mihomo YAML import.
 
 ---
 

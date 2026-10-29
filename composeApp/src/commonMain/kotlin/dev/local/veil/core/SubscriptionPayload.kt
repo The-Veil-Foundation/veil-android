@@ -56,9 +56,9 @@ object SubscriptionPayload {
             jsonBody(text)?.let { return it }
         }
 
-        // 2. Mihomo / Clash YAML — пока не поддерживается, но скажем честно.
+        // 2. Mihomo / Clash YAML: импортируем узлы из `proxies`.
         if (text.contains("proxies:") && text.contains("type:")) {
-            return Body.Failure(Format.MIHOMO, "Профиль Mihomo/Clash пока не поддерживается")
+            MihomoParser.parse(text)?.let { return it }
         }
 
         // 3. wg-quick

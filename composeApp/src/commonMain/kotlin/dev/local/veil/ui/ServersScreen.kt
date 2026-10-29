@@ -1,6 +1,14 @@
 package dev.local.veil.ui
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -35,8 +43,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -89,21 +100,52 @@ fun ServersScreen(
         }
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            StatusCard(
-                status = status,
-                server = state.selected,
-                onToggle = { state.toggleTunnel(status) },
-                checkingServer = state.checkingServer,
-                now = now,
-            )
+    val listState = rememberLazyListState()
+    val compact by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 48
+        }
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        // Большая карточка плавно превращается в компактную панель с той же
+        // кнопкой включения, как только список прокрутили.
+        AnimatedContent(
+            targetState = compact,
+            transitionSpec = {
+                (fadeIn(tween(180)) + scaleIn(initialScale = 0.97f)) togetherWith
+                    (fadeOut(tween(120)) + scaleOut(targetScale = 0.99f))
+            },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            label = "status-morph",
+        ) { isCompact ->
+            if (isCompact) {
+                CompactStatusBar(
+                    status = status,
+                    server = state.selected,
+                    onToggle = { state.toggleTunnel(status) },
+                    checkingServer = state.checkingServer,
+                    now = now,
+                )
+            } else {
+                StatusCard(
+                    status = status,
+                    server = state.selected,
+                    onToggle = { state.toggleTunnel(status) },
+                    checkingServer = state.checkingServer,
+                    now = now,
+                )
+            }
         }
 
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
         item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -175,6 +217,7 @@ fun ServersScreen(
                     }
                 }
             }
+        }
         }
     }
 }

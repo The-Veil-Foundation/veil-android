@@ -31,8 +31,8 @@ data class AppSettings(
     val fragment: Boolean = false,
     /** Российские домены — напрямую, мимо туннеля. */
     val bypassRu: Boolean = false,
-    /** Pitch Black: чистый чёрный фон для OLED, вместо тёмно-серого Material. */
-    val pitchBlack: Boolean = true,
+    /** Pitch Black: чистый чёрный фон для OLED. По умолчанию выключен. */
+    val pitchBlack: Boolean = false,
 ) {
     fun toTunnelOptions(logFile: String? = null) = TunnelOptions(
         mtu = mtu,

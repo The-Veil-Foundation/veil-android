@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -294,6 +295,113 @@ private fun StatusDot(connected: Boolean, working: Boolean) {
             )
         }
         drawCircle(color = dotColor, radius = size.minDimension / 2f * 0.42f)
+    }
+}
+
+/**
+ * Компактная панель статуса: та же кнопка включения, но одной строкой.
+ * Появляется, когда список серверов прокручен и большая карточка свёрнута.
+ */
+@Composable
+fun CompactStatusBar(
+    status: VpnStatus,
+    server: ProxyConfig?,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    checkingServer: ProxyConfig? = null,
+    now: Long = 0L,
+) {
+    val connected = status.isConnected
+    val working = checkingServer != null || status.phase == VpnPhase.CONNECTING
+    val shown = checkingServer ?: server
+
+    val seconds = if (status.connectedSince > 0 && now > 0) {
+        ((now - status.connectedSince) / 1000).coerceAtLeast(0).toInt()
+    } else {
+        0
+    }
+
+    val container by animateColorAsState(
+        if (connected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        animationSpec = tween(350),
+        label = "compact-bg",
+    )
+    val content by animateColorAsState(
+        if (connected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface,
+        animationSpec = tween(350),
+        label = "compact-fg",
+    )
+    val shape = RoundedCornerShape(26.dp)
+
+    Surface(
+        color = container,
+        contentColor = content,
+        shape = shape,
+        shadowElevation = 3.dp,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusDot(connected = connected, working = working)
+            Spacer(Modifier.size(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = shown?.name ?: "Сервер не выбран",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = buildString {
+                        append(
+                            when {
+                                checkingServer != null -> "Проверяем…"
+                                status.phase == VpnPhase.CONNECTED -> "Защищено"
+                                status.phase == VpnPhase.CONNECTING -> "Подключаем…"
+                                status.phase == VpnPhase.ERROR -> "Ошибка"
+                                else -> "Не защищено"
+                            },
+                        )
+                        if (connected) append(" · ").append(formatDuration(seconds))
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            if (connected) {
+                Text(
+                    text = formatSpeed(status.downlinkSpeed),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(end = 10.dp),
+                )
+            }
+            FilledIconButton(
+                onClick = onToggle,
+                enabled = !working,
+                shape = CircleShape,
+                modifier = Modifier.size(44.dp),
+            ) {
+                if (working) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (connected) Icons.Rounded.Shield else Icons.Rounded.PowerSettingsNew,
+                        contentDescription = if (connected) "Отключить" else "Подключить",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
