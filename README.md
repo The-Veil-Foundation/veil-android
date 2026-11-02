@@ -24,6 +24,7 @@
   <img src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white" alt="Android 7.0+">
   <img src="https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin Multiplatform">
   <img src="https://img.shields.io/badge/core-Xray-orange" alt="Core: Xray">
+  <img src="https://img.shields.io/badge/sing--box-in_progress-yellow" alt="sing-box: in progress">
 </p>
 
 <p align="center">
@@ -34,10 +35,11 @@
 ---
 
 Veil for Android is a Kotlin Multiplatform + Jetpack Compose port of
-[veil-ios](https://github.com/The-Veil-Foundation/veil-ios), built on a single core —
-[Xray-core](https://github.com/XTLS/Xray-core). Material 3 Expressive UI, subscription
-profiles, one-tap connect, real node verification with automatic failover, and a tunnel
-with no tun2socks and no extra hops in the data path.
+[veil-ios](https://github.com/The-Veil-Foundation/veil-ios), built on
+[Xray-core](https://github.com/XTLS/Xray-core), with a [sing-box](https://github.com/SagerNet/sing-box)
+engine on the way. Material 3 Expressive UI, subscription profiles, one-tap connect, real node
+verification with automatic failover, phone-to-TV transfer, and a tunnel with no tun2socks and
+no extra hops in the data path.
 
 > **Status: alpha (`0.1.0-alpha`).** Tested on a physical Samsung Galaxy S20 FE with live
 > VLESS/REALITY subscriptions. Expect rough edges.
@@ -65,17 +67,21 @@ itself (*Settings → Check for updates*).
 
 ### Protocols
 
-| Core | Protocols | Transports & security |
-| --- | --- | --- |
-| **Xray-core** | VLESS, VMess, Trojan, Shadowsocks, WireGuard | REALITY, TLS, XTLS Vision, XHTTP, uTLS fingerprints |
+| Engine | Protocols | Transports & security | Status |
+| --- | --- | --- | --- |
+| **Xray-core** | VLESS, VMess, Trojan, Shadowsocks, WireGuard | REALITY, TLS, XTLS Vision, XHTTP, uTLS fingerprints | ✅ default |
+| **sing-box** | Hysteria2, TUIC, AnyTLS and the rest | QUIC-based and modern transports | ⏳ in progress |
 
-Hysteria2, TUIC and AnyTLS links are recognised but marked unusable — they need sing-box,
-and this build is deliberately Xray-only.
+The engine is picked in *Settings → Core*. The sing-box config builder is in place, but the
+sing-box runtime is not bundled yet, so connections still go through Xray. Until it lands,
+Hysteria2, TUIC and AnyTLS links are imported but marked unusable.
 
 ### Subscriptions
 
 - Plain share links, base64 lists, ready-made Xray config arrays and **Mihomo / Clash YAML**
   (`proxies:` imported as nodes; groups and rules are not used yet).
+- **Happ** (`happ://`) and **INCY** (`incy://`) share links.
+- Xray configs with a balancer show how many outbounds the panel folded into the node.
 - Manual, per-group and scheduled refresh.
 - Reads `subscription-userinfo`, so each subscription card shows traffic used and expiry.
 
@@ -88,17 +94,41 @@ and this build is deliberately Xray-only.
 - Switching servers keeps the live tunnel up while the candidate is tested; the session timer
   survives.
 
+### Servers
+
+- **Action sheet** per server and subscription — connect, ping, copy or share the link, show a
+  QR, refresh or delete the subscription.
+- **Node details** — protocol, address, transport and security, with keys hidden until you tap
+  *Show keys*.
+- **Three ping modes** — TCP handshake (fast), ICMP (like `ping`), or a **real** request through
+  the server (what apps actually feel). Ping one node or a whole group.
+
+### Share and transfer
+
+- **Share links and QR codes** for any node, rebuilt from its config (`ShareLink`, the inverse
+  of the parser).
+- **Phone → TV transfer.** The TV box shows a QR with its LAN address; the phone scans it and
+  sends its subscriptions and manual servers over the local network. Only private
+  (`10/8`, `172.16/12`, `192.168/16`) addresses are accepted, so a forged QR cannot make the
+  phone send them to a server on the internet.
+- **System share sheet** for sending anything to another app.
+
 ### Network
 
-- **Split tunneling** — include or exclude apps.
+- **Split tunneling** — everything through VPN, everything *except* selected apps, or *only*
+  selected apps, with search.
+- **IPv6** in the tunnel or around it, adjustable **MTU**.
 - **RU bypass** — `.ru` / `.su` / `.рф` go direct.
 - **DPI fragmentation** — TLS ClientHello fragmentation via Xray `finalmask`.
 
 ### Everything else
 
+- **Material 3 Expressive** — shape morphing, spring motion, segmented settings in bottom sheets.
 - **Live UI** — download/upload speed, session time, pulsing connection state, floating toasts.
+- **Notification** — VPN state and quick actions in the shade.
 - **QR scanner** — camera2 + ZXing, no Google Play Services required.
-- **Android TV** — launcher entry, banner and full D-pad navigation.
+- **Android TV** — launcher entry, banner, full D-pad navigation and a *Receive from another
+  device* screen.
 - **Pitch Black** — true-black theme for OLED screens.
 - **Core logs** — in-app viewer with copy and clear.
 - **Over-the-air updates** — straight from GitHub Releases.
@@ -149,7 +179,7 @@ Scripts/build-xray-android.sh          # core, once (~10–20 min) → composeAp
 > "xray.aar is not bundled".
 
 ```bash
-./gradlew :composeApp:desktopTest      # 28 tests: link parsing, config generation, Mihomo YAML
+./gradlew :composeApp:desktopTest      # 40 tests: links, share links, configs, Mihomo YAML
 ```
 
 <details>
@@ -188,7 +218,9 @@ In the app: *Settings → Core logs*. Files live in
 | Xray config builder | `Core/XrayConfigBuilder.swift` | ✅ ported, tested |
 | TUN + core | `Tunnel/PacketTunnelProvider.swift` | ✅ on `VpnService` |
 | Go bridge | `XrayBridge/xray.go` | ✅ reused + probe instance |
-| UI | `App/Views/*` | ✅ servers, subscriptions, settings, split tunnel, logs |
+| UI | `App/Views/*` | ✅ servers, subscriptions, settings, split tunnel, logs, transfer |
+| Share links | — | ✅ `ShareLink`, inverse of the parser |
+| sing-box engine | — | ⏳ setting and config builder done, runtime not bundled |
 | `urltest` groups, Mihomo selectors | — | ⏳ not yet |
 | Routing rules editor, DNS editor | — | ⏳ not yet |
 | Config inspector, secret redaction | — | ⏳ not yet |
@@ -222,6 +254,7 @@ docs/              porting notes, release guide
 ## Acknowledgements
 
 - [XTLS/Xray-core](https://github.com/XTLS/Xray-core) — proxy engine
+- [SagerNet/sing-box](https://github.com/SagerNet/sing-box) — second engine (in progress)
 - [ZXing](https://github.com/zxing/zxing) — QR decoding
 - [JetBrains Compose Multiplatform](https://github.com/JetBrains/compose-multiplatform) — UI
 
