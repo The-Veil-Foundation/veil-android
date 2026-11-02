@@ -33,9 +33,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -166,7 +163,7 @@ private fun SubscriptionCardRow(
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Rounded.Delete, contentDescription = "Удалить", modifier = Modifier.size(18.dp))
+                    AppIcon(AppIcons.Trash, contentDescription = "Удалить", modifier = Modifier.size(18.dp))
                 }
             }
             Text(
@@ -179,7 +176,7 @@ private fun SubscriptionCardRow(
             }
             Row {
                 TextButton(onClick = onRefresh, enabled = !busy) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    AppIcon(AppIcons.Refresh, modifier = Modifier.size(18.dp))
                     Text(if (busy) " Обновляю…" else " Обновить")
                 }
             }

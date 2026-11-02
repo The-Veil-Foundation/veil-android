@@ -51,10 +51,9 @@ class CoreEngineTest {
     }
 
     @Test
-    fun settingsPassEngineToTunnelOptions() {
+    fun engineIsAlwaysAutomaticInTunnelOptions() {
+        // Ручного выбора в UI нет: даже сохранённое значение игнорируется.
         val settings = AppSettings(coreEngine = CoreEngine.SING_BOX)
-        assertEquals(CoreEngine.SING_BOX, settings.toTunnelOptions().coreEngine)
-        // По умолчанию — авто.
-        assertEquals(CoreEngine.AUTO, AppSettings().toTunnelOptions().coreEngine)
+        assertEquals(CoreEngine.AUTO, settings.toTunnelOptions().coreEngine)
     }
 }

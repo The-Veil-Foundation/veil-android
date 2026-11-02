@@ -9,19 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Apps
-import androidx.compose.material.icons.rounded.BugReport
-import androidx.compose.material.icons.rounded.CloudSync
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Lan
-import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material.icons.rounded.QrCode2
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -35,7 +22,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.local.veil.core.CoreEngine
 import dev.local.veil.core.SplitMode
 import dev.local.veil.platform.PingMode
 import dev.local.veil.platform.VpnPhase
@@ -75,7 +61,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Обновления",
-            icon = Icons.Rounded.SystemUpdate,
+            icon = AppIcons.Update,
             rows = listOf(
                 {
                     SegmentAction(
@@ -91,7 +77,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Оформление",
-            icon = Icons.Rounded.DarkMode,
+            icon = AppIcons.Moon,
             rows = listOf(
                 {
                     SegmentSwitch(
@@ -104,43 +90,11 @@ fun SettingsScreen(
             ),
         )
 
-        /* ---------------- Ядро ---------------- */
-
-        SettingsGroup(
-            title = "Ядро",
-            icon = Icons.Rounded.Memory,
-            rows = listOf(
-                {
-                    SegmentChoice(
-                        title = "Движок",
-                        subtitle = when (settings.coreEngine) {
-                            CoreEngine.AUTO -> state.selected?.let {
-                                "Авто — сейчас ${settings.coreEngine.resolve(it).label}"
-                            } ?: "Авто — по протоколу узла"
-                            CoreEngine.XRAY -> "Xray-core — проверенное ядро"
-                            CoreEngine.SING_BOX -> "sing-box — новые протоколы"
-                        },
-                        options = listOf(
-                            SegmentOption("Авто", settings.coreEngine == CoreEngine.AUTO) {
-                                state.saveSettings(settings.copy(coreEngine = CoreEngine.AUTO))
-                            },
-                            SegmentOption("Xray", settings.coreEngine == CoreEngine.XRAY) {
-                                state.saveSettings(settings.copy(coreEngine = CoreEngine.XRAY))
-                            },
-                            SegmentOption("sing-box", settings.coreEngine == CoreEngine.SING_BOX) {
-                                state.saveSettings(settings.copy(coreEngine = CoreEngine.SING_BOX))
-                            },
-                        ),
-                    )
-                },
-            ),
-        )
-
         /* ---------------- Диагностика ---------------- */
 
         SettingsGroup(
             title = "Диагностика",
-            icon = Icons.Rounded.BugReport,
+            icon = AppIcons.Tuning,
             rows = listOf(
                 {
                     SegmentAction(
@@ -170,7 +124,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Туннель",
-            icon = Icons.Rounded.Lan,
+            icon = AppIcons.Global,
             rows = listOf(
                 {
                     SegmentChoice(
@@ -218,7 +172,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Обход блокировок",
-            icon = Icons.Rounded.Shield,
+            icon = AppIcons.Shield,
             rows = listOf(
                 {
                     SegmentSwitch(
@@ -243,7 +197,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Раздельный туннель",
-            icon = Icons.Rounded.Apps,
+            icon = AppIcons.Devices,
             rows = listOf(
                 {
                     SegmentAction(
@@ -266,7 +220,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Подписка",
-            icon = Icons.Rounded.CloudSync,
+            icon = AppIcons.Cloud,
             rows = listOf(
                 {
                     SegmentAction(
@@ -300,7 +254,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Пинг",
-            icon = Icons.Rounded.Speed,
+            icon = AppIcons.Stopwatch,
             rows = listOf(
                 {
                     SegmentChoice(
@@ -320,7 +274,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Уведомления",
-            icon = Icons.Rounded.NotificationsActive,
+            icon = AppIcons.Bell,
             rows = listOf(
                 {
                     SegmentSwitch(
@@ -337,7 +291,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Перенос",
-            icon = Icons.Rounded.QrCode2,
+            icon = AppIcons.Qr,
             rows = listOf(
                 {
                     SegmentAction(
@@ -353,7 +307,7 @@ fun SettingsScreen(
 
         SettingsGroup(
             title = "Состояние",
-            icon = Icons.Rounded.Info,
+            icon = AppIcons.Info,
             rows = listOf(
                 { SegmentInfo("Профилей", state.servers.size.toString()) },
                 { SegmentInfo("Туннель", status.phase.label) },

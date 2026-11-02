@@ -34,13 +34,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -249,10 +242,8 @@ fun StatusCard(
                                 color = MaterialTheme.colorScheme.onPrimary,
                             )
                         } else {
-                            Icon(
-                                imageVector = if (text == "Отключить") Icons.Rounded.Shield
-                                else Icons.Rounded.PowerSettingsNew,
-                                contentDescription = null,
+                            AppIcon(
+                                icon = if (text == "Отключить") AppIcons.Shield else AppIcons.Power,
                                 modifier = Modifier.size(20.dp),
                             )
                         }
@@ -363,8 +354,8 @@ fun CompactStatusBar(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                 } else {
-                    Icon(
-                        imageVector = if (connected) Icons.Rounded.Shield else Icons.Rounded.PowerSettingsNew,
+                    AppIcon(
+                        icon = if (connected) AppIcons.Shield else AppIcons.Power,
                         contentDescription = if (connected) "Отключить" else "Подключить",
                         modifier = Modifier.size(20.dp),
                     )
@@ -419,7 +410,7 @@ fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
             if (pinging && !measured) {
                 ExpressiveLoader(diameter = 12.dp, color = fg)
             } else {
-                Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(12.dp))
+                AppIcon(AppIcons.Bolt, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.size(2.dp))
                 AnimatedContent(
                     targetState = ms,
@@ -469,9 +460,9 @@ fun BulletinHost(
 
         val scheme = MaterialTheme.colorScheme
         val (bg, fg, icon) = when (current.kind) {
-            BulletinKind.SUCCESS -> Triple(scheme.primaryContainer, scheme.onPrimaryContainer, Icons.Rounded.CheckCircle)
-            BulletinKind.ERROR -> Triple(scheme.errorContainer, scheme.onErrorContainer, Icons.Rounded.ErrorOutline)
-            BulletinKind.INFO -> Triple(scheme.secondaryContainer, scheme.onSecondaryContainer, Icons.Rounded.Info)
+            BulletinKind.SUCCESS -> Triple(scheme.primaryContainer, scheme.onPrimaryContainer, AppIcons.Check)
+            BulletinKind.ERROR -> Triple(scheme.errorContainer, scheme.onErrorContainer, AppIcons.Danger)
+            BulletinKind.INFO -> Triple(scheme.secondaryContainer, scheme.onSecondaryContainer, AppIcons.Info)
         }
 
         Surface(
@@ -487,7 +478,7 @@ fun BulletinHost(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                AppIcon(icon, modifier = Modifier.size(20.dp))
                 Text(
                     text = current.text,
                     style = MaterialTheme.typography.bodyMedium,

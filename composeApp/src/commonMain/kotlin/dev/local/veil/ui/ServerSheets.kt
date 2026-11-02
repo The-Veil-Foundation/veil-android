@@ -23,21 +23,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.CloudSync
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.QrCode2
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.UnfoldLess
-import androidx.compose.material.icons.rounded.UnfoldMore
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -205,9 +190,8 @@ private fun ActionsSheet(
                     SheetPage.DETAILS -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         PageBar(title = "Подробности", onBack = { page = SheetPage.ACTIONS }) {
                             TextButton(onClick = { reveal = !reveal }) {
-                                Icon(
-                                    if (reveal) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                    contentDescription = null,
+                                AppIcon(
+                                    if (reveal) AppIcons.EyeOff else AppIcons.Eye,
                                     modifier = Modifier.size(18.dp),
                                 )
                                 Spacer(Modifier.size(6.dp))
@@ -235,7 +219,7 @@ private fun ActionsSheet(
                         )
                         if (onShareQr != null) {
                             TextButton(onClick = onShareQr) {
-                                Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                AppIcon(AppIcons.Share, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(6.dp))
                                 Text("Поделиться ссылкой")
                             }
@@ -251,7 +235,7 @@ private fun ActionsSheet(
 private fun SheetHeader(icon: ImageVector, title: String, subtitle: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         CookieBadge(diameter = 56.dp, color = MaterialTheme.colorScheme.primaryContainer) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            AppIcon(icon, tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
         Column(Modifier.weight(1f)) {
             Text(
@@ -276,7 +260,7 @@ private fun SheetHeader(icon: ImageVector, title: String, subtitle: String) {
 private fun PageBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Назад")
+            AppIcon(AppIcons.ArrowLeft, contentDescription = "Назад")
         }
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         actions()
@@ -323,7 +307,7 @@ private fun ActionTile(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Icon(action.icon, contentDescription = null)
+            AppIcon(action.icon)
             Column(Modifier.weight(1f)) {
                 Text(action.title, style = MaterialTheme.typography.titleMedium)
                 if (action.subtitle != null) {
@@ -360,7 +344,7 @@ fun ServerActionsSheet(
     }
 
     ActionsSheet(
-        icon = Icons.Rounded.Dns,
+        icon = AppIcons.Server,
         title = server.name,
         subtitle = buildString {
             append(server.proto.wire.uppercase()).append(" · ").append(endpoint)
@@ -373,33 +357,33 @@ fun ServerActionsSheet(
         buildActions = { sheet ->
             buildList {
                 if (!selected) {
-                    add(SheetAction(Icons.Rounded.CheckCircle, "Выбрать") {
+                    add(SheetAction(AppIcons.Check, "Выбрать") {
                         sheet.close { state.select(server.id, status) }
                     })
                 }
-                add(SheetAction(Icons.Rounded.Speed, "Проверить пинг", "Метод: ${state.pingMode.label}") {
+                add(SheetAction(AppIcons.Stopwatch, "Проверить пинг", "Метод: ${state.pingMode.label}") {
                     sheet.close { state.pingOne(server) }
                 })
-                add(SheetAction(Icons.Rounded.Visibility, "Посмотреть", "Параметры узла") {
+                add(SheetAction(AppIcons.Eye, "Посмотреть", "Параметры узла") {
                     sheet.navigate(SheetPage.DETAILS)
                 })
                 if (link != null) {
-                    add(SheetAction(Icons.Rounded.QrCode2, "QR-код", "Перенести на другое устройство") {
+                    add(SheetAction(AppIcons.Qr, "QR-код", "Перенести на другое устройство") {
                         sheet.navigate(SheetPage.QR)
                     })
-                    add(SheetAction(Icons.Rounded.ContentCopy, "Копировать ссылку") {
+                    add(SheetAction(AppIcons.Copy, "Копировать ссылку") {
                         sheet.close {
                             clipboard.setText(AnnotatedString(link))
                             state.showBulletin("Ссылка скопирована", BulletinKind.SUCCESS)
                         }
                     })
-                    add(SheetAction(Icons.Rounded.Share, "Поделиться") {
+                    add(SheetAction(AppIcons.Share, "Поделиться") {
                         sheet.close { state.share(link) }
                     })
                 }
                 add(
                     SheetAction(
-                        icon = Icons.Rounded.Delete,
+                        icon = AppIcons.Trash,
                         title = "Удалить",
                         destructive = true,
                         confirmText = "Удалить «${server.name}»? Это нельзя отменить.",
@@ -506,7 +490,7 @@ fun SubscriptionActionsSheet(
     val clipboard = LocalClipboardManager.current
 
     ActionsSheet(
-        icon = Icons.Rounded.CloudSync,
+        icon = AppIcons.Cloud,
         title = title,
         subtitle = if (source == null) "${servers.size} серверов, добавлены вручную" else "${servers.size} серверов",
         qrText = source,
@@ -516,38 +500,38 @@ fun SubscriptionActionsSheet(
         details = null,
         buildActions = { sheet ->
             buildList {
-                add(SheetAction(Icons.Rounded.Speed, "Проверить пинг группы", "Метод: ${state.pingMode.label}") {
+                add(SheetAction(AppIcons.Stopwatch, "Проверить пинг группы", "Метод: ${state.pingMode.label}") {
                     sheet.close { state.pingSource(source) }
                 })
                 if (source != null) {
-                    add(SheetAction(Icons.Rounded.Refresh, "Обновить подписку") {
+                    add(SheetAction(AppIcons.Refresh, "Обновить подписку") {
                         sheet.close {
                             state.subscriptions.firstOrNull { it.url == source }?.let(state::refreshSubscription)
                         }
                     })
-                    add(SheetAction(Icons.Rounded.QrCode2, "QR-код подписки", "Перенести на приставку или телефон") {
+                    add(SheetAction(AppIcons.Qr, "QR-код подписки", "Перенести на приставку или телефон") {
                         sheet.navigate(SheetPage.QR)
                     })
-                    add(SheetAction(Icons.Rounded.ContentCopy, "Копировать ссылку") {
+                    add(SheetAction(AppIcons.Copy, "Копировать ссылку") {
                         sheet.close {
                             clipboard.setText(AnnotatedString(source))
                             state.showBulletin("Ссылка скопирована", BulletinKind.SUCCESS)
                         }
                     })
-                    add(SheetAction(Icons.Rounded.Share, "Поделиться") {
+                    add(SheetAction(AppIcons.Share, "Поделиться") {
                         sheet.close { state.share(source) }
                     })
                 }
                 add(
                     SheetAction(
-                        icon = if (collapsed) Icons.Rounded.UnfoldMore else Icons.Rounded.UnfoldLess,
+                        icon = if (collapsed) AppIcons.ChevronDown else AppIcons.ChevronUp,
                         title = if (collapsed) "Развернуть список" else "Свернуть список",
                     ) { sheet.close(onToggleCollapse) },
                 )
                 if (source != null) {
                     add(
                         SheetAction(
-                            icon = Icons.Rounded.Delete,
+                            icon = AppIcons.Trash,
                             title = "Удалить подписку",
                             subtitle = "Вместе со всеми её серверами",
                             destructive = true,

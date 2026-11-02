@@ -6,8 +6,6 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material3.Button
 import dev.local.veil.platform.PingMode
 import androidx.compose.animation.core.animateDpAsState
@@ -44,14 +42,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.SystemUpdate
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -64,10 +54,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -84,6 +72,7 @@ private data class Group(
     val title: String,
     val source: String?,
     val servers: List<ProxyConfig>,
+    val meta: String? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,6 +85,7 @@ fun ServersScreen(
     now: Long = 0L,
     onOpenReceive: () -> Unit = {},
 ) {
+    var query by remember { mutableStateOf("") }
     var onlyFast by remember { mutableStateOf(false) }
     var collapsed by remember { mutableStateOf<Set<String>>(emptySet()) }
     val seen = remember { mutableSetOf<Any>() }
@@ -103,15 +93,22 @@ fun ServersScreen(
     var sheetServer by remember { mutableStateOf<ProxyConfig?>(null) }
     var sheetGroup by remember { mutableStateOf<Group?>(null) }
 
-    val groups = remember(state.servers, state.subscriptions, onlyFast, state.pings) {
-        val visible = if (onlyFast) {
-            state.servers.filter { (state.pings[it.id] ?: Int.MAX_VALUE) < 250 }
-        } else {
-            state.servers
-        }
+    val groups = remember(state.servers, state.subscriptions, onlyFast, state.pings, query) {
+        val needle = query.trim()
+        val visible = state.servers
+            .filter { needle.isEmpty() || it.name.contains(needle, ignoreCase = true) }
+            .filter { !onlyFast || (state.pings[it.id] ?: Int.MAX_VALUE) < 250 }
 
         visible.groupBy { it.source }.map { (source, list) ->
             val subscription = state.subscriptions.firstOrNull { it.url == source }
+            val meta = subscription?.let { sub ->
+                buildList {
+                    if (sub.totalBytes > 0) {
+                        add("${formatBytes(sub.usedBytes)} из ${formatBytes(sub.totalBytes)}")
+                    }
+                    if (sub.expireAt > 0) add("до ${formatDate(sub.expireAt)}")
+                }.joinToString(" · ").ifBlank { null }
+            }
             Group(
                 key = source ?: "manual",
                 title = when {
@@ -121,6 +118,7 @@ fun ServersScreen(
                 },
                 source = source,
                 servers = list,
+                meta = meta,
             )
         }
     }
@@ -169,16 +167,19 @@ fun ServersScreen(
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
         if (state.update != null) {
             item(key = "update") { UpdateAvailableRow(state = state) }
+        }
+        item(key = "search") {
+            SearchPill(query = query, onQueryChange = { query = it })
         }
         item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
             ) {
                 FilterChip(
                     selected = !onlyFast,
@@ -195,7 +196,7 @@ fun ServersScreen(
                     onClick = if (state.pinging) state::cancelPing else state::pingAll,
                     enabled = state.servers.isNotEmpty(),
                 ) {
-                    Icon(Icons.Rounded.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
+                    AppIcon(AppIcons.Stopwatch, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(4.dp))
                     Text(if (state.pinging) "Стоп" else "Пинг")
                 }
@@ -208,7 +209,7 @@ fun ServersScreen(
                     text = if (state.servers.isEmpty()) {
                         "Серверов пока нет.\nНажмите + и вставьте ссылку на подписку."
                     } else {
-                        "Под фильтр ничего не подходит."
+                        if (query.isNotBlank()) "Ничего не найдено." else "Под фильтр ничего не подходит."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -225,7 +226,7 @@ fun ServersScreen(
                             .staggerIn(seen, "cta", 1)
                             .padding(horizontal = 24.dp, vertical = 16.dp),
                     ) {
-                        Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(20.dp))
+                        AppIcon(AppIcons.Qr, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.size(8.dp))
                         Text("Принять с телефона по QR", fontWeight = FontWeight.Bold)
                     }
@@ -251,6 +252,8 @@ fun ServersScreen(
                     itemsIndexed(group.servers, key = { _, it -> it.id }) { i, server ->
                         ServerRow(
                             modifier = Modifier.animateItem(),
+                            first = i == 0,
+                            last = i == group.servers.lastIndex,
                             server = server,
                             selected = server.id == state.selected?.id,
                             ping = state.pings[server.id],
@@ -289,6 +292,60 @@ fun ServersScreen(
     }
 }
 
+/** Компактное поле поиска в стиле iOS: пилюля без рамки. */
+@Composable
+private fun SearchPill(query: String, onQueryChange: (String) -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AppIcon(
+                AppIcons.Search,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            androidx.compose.foundation.text.BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                    if (query.isEmpty()) {
+                        Text(
+                            "Поиск серверов…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    inner()
+                },
+            )
+            if (query.isNotEmpty()) {
+                IconButton(
+                    onClick = { onQueryChange("") },
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    AppIcon(
+                        AppIcons.Close,
+                        contentDescription = "Очистить",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun GroupHeader(
@@ -300,50 +357,57 @@ private fun GroupHeader(
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val headerShape = MaterialTheme.shapes.medium
-    // Шеврон не подменяется, а поворачивается с пружиной.
+    // Шеврон не подменяется, а поворачивается — как в списках iOS.
     val chevron by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(180),
         label = "chevron",
     )
-    Surface(
-        shape = headerShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = modifier.fillMaxWidth(),
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onToggle, onLongClick = onMore)
+            .padding(start = 6.dp, end = 4.dp, top = 14.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier
-                .combinedClickable(onClick = onToggle, onLongClick = onMore)
-                .padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp).rotate(chevron),
-            )
-            Spacer(Modifier.size(8.dp))
-            Column(Modifier.weight(1f)) {
+        AppIcon(
+            AppIcons.ChevronDown,
+            modifier = Modifier.size(18.dp).rotate(chevron),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(6.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = group.title,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
+                Spacer(Modifier.size(6.dp))
                 Text(
-                    text = "${group.servers.size} серверов",
+                    text = "${group.servers.size}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onPing, enabled = !pinging) {
-                Icon(Icons.Rounded.Speed, contentDescription = "Пинг группы", modifier = Modifier.size(20.dp))
+            group.meta?.let { meta ->
+                Text(
+                    text = meta,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            IconButton(onClick = onMore) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "Действия", modifier = Modifier.size(20.dp))
-            }
+        }
+        IconButton(onClick = onPing, enabled = !pinging) {
+            AppIcon(AppIcons.Stopwatch, contentDescription = "Пинг группы", modifier = Modifier.size(20.dp))
+        }
+        IconButton(onClick = onMore) {
+            AppIcon(AppIcons.More, contentDescription = "Действия", modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -351,6 +415,8 @@ private fun GroupHeader(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ServerRow(
+    first: Boolean,
+    last: Boolean,
     server: ProxyConfig,
     selected: Boolean,
     ping: Int?,
@@ -370,9 +436,9 @@ private fun ServerRow(
         label = "row-press",
     )
 
-    // Выбранная строка округляется и перекрашивается с пружинным отскоком.
+    // Сегментированный список как в bottom sheet: крайние строки крупнее.
     val corner by animateDpAsState(
-        targetValue = if (selected) 32.dp else 24.dp,
+        targetValue = if (selected) 28.dp else 20.dp,
         animationSpec = tween(180),
         label = "row-corner",
     )
@@ -387,7 +453,14 @@ private fun ServerRow(
         label = "row-fg",
     )
     val haptics = LocalHapticFeedback.current
-    val rowShape = RoundedCornerShape(corner)
+    val topRadius = if (first) corner else 6.dp
+    val bottomRadius = if (last) corner else 6.dp
+    val rowShape = RoundedCornerShape(
+        topStart = topRadius,
+        topEnd = topRadius,
+        bottomStart = bottomRadius,
+        bottomEnd = bottomRadius,
+    )
     Surface(
         shape = rowShape,
         color = rowColor,
@@ -456,9 +529,8 @@ private fun UpdateAvailableRow(state: VeilState) {
             Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Rounded.SystemUpdate,
-                contentDescription = null,
+            AppIcon(
+                AppIcons.Update,
                 modifier = Modifier.size(20.dp),
             )
             Spacer(Modifier.size(10.dp))
@@ -474,7 +546,7 @@ private fun UpdateAvailableRow(state: VeilState) {
                 )
             }
             IconButton(onClick = { state.dismissUpdate() }) {
-                Icon(Icons.Rounded.Close, contentDescription = "Скрыть", modifier = Modifier.size(18.dp))
+                AppIcon(AppIcons.Close, contentDescription = "Скрыть", modifier = Modifier.size(18.dp))
             }
         }
     }

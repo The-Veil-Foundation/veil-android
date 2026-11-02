@@ -18,10 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -68,9 +65,8 @@ internal fun SettingsGroup(
                     .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
+                AppIcon(
                     icon,
-                    contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.size(15.dp),
                 )
@@ -155,10 +151,9 @@ internal fun SegmentAction(
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             subtitle?.let { SegmentCaption(it) }
         }
-        Icon(
-            Icons.Rounded.ChevronRight,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
+        AppIcon(
+            AppIcons.ChevronRight,
+            modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -290,9 +285,8 @@ private fun SegmentIcon(icon: ImageVector) {
             .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
+        AppIcon(
             icon,
-            contentDescription = null,
             tint = MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.size(19.dp),
         )

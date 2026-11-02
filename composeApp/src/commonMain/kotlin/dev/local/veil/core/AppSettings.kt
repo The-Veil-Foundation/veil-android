@@ -73,7 +73,8 @@ data class AppSettings(
         dnsServers = dns,
         fragment = fragment,
         bypassRu = bypassRu,
-        coreEngine = coreEngine,
+        // Ядро выбирается автоматически по протоколу; ручного выбора в UI нет.
+        coreEngine = CoreEngine.AUTO,
     )
 }
 

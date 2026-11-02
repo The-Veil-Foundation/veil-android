@@ -2,7 +2,6 @@ package dev.local.veil.ui
 
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -14,7 +13,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -32,14 +30,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.CloudSync
-import androidx.compose.material.icons.rounded.QrCodeScanner
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.ViewList
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -176,7 +166,7 @@ fun App(container: AppContainer) {
                         ),
                         navigationIcon = {
                             IconButton(onClick = { showLogs = false }) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Назад")
+                                AppIcon(AppIcons.ArrowLeft, contentDescription = "Назад")
                             }
                         },
                         title = { Text("Логи ядра", fontWeight = FontWeight.Black) },
@@ -188,7 +178,7 @@ fun App(container: AppContainer) {
                         ),
                         navigationIcon = {
                             IconButton(onClick = { showSplit = false }) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Назад")
+                                AppIcon(AppIcons.ArrowLeft, contentDescription = "Назад")
                             }
                         },
                         title = { Text("Раздельный туннель", fontWeight = FontWeight.Black) },
@@ -200,7 +190,7 @@ fun App(container: AppContainer) {
                         ),
                         navigationIcon = {
                             IconButton(onClick = { showReceive = false }) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Назад")
+                                AppIcon(AppIcons.ArrowLeft, contentDescription = "Назад")
                             }
                         },
                         title = { Text("Принять с другого устройства", fontWeight = FontWeight.Black) },
@@ -247,32 +237,7 @@ fun App(container: AppContainer) {
                     enter = slideInVertically(tween(180)) { it } + fadeIn(),
                     exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(150)),
                 ) {
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-                        Tab.entries.forEach { entry ->
-                            NavigationBarItem(
-                                selected = tab == entry,
-                                onClick = { tab = entry },
-                                icon = {
-                                    // Выбранная иконка чуть крупнее — без подпрыгивания.
-                                    val pop by animateFloatAsState(
-                                        if (tab == entry) 1.1f else 1f,
-                                        tween(180),
-                                        label = "nav-pop",
-                                    )
-                                    Icon(
-                                        modifier = Modifier.graphicsLayer { scaleX = pop; scaleY = pop },
-                                        imageVector = when (entry) {
-                                            Tab.SERVERS -> Icons.Rounded.ViewList
-                                            Tab.SUBS -> Icons.Rounded.CloudSync
-                                            Tab.SETTINGS -> Icons.Rounded.Settings
-                                        },
-                                        contentDescription = null,
-                                    )
-                                },
-                                label = { Text(entry.label) },
-                            )
-                        }
-                    }
+                    VeilNavigationBar(current = tab, onSelect = { tab = it })
                 }
             },
             floatingActionButton = {
@@ -293,7 +258,7 @@ fun App(container: AppContainer) {
                         shape = fabShape,
                         interactionSource = fabSource,
                     ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Добавить")
+                        AppIcon(AppIcons.Add, contentDescription = "Добавить")
                     }
                 }
             },
@@ -382,7 +347,7 @@ fun App(container: AppContainer) {
             AlertDialog(
                 onDismissRequest = state::dismissTransfer,
                 shape = RoundedCornerShape(32.dp),
-                icon = { Icon(Icons.Rounded.QrCode2, contentDescription = null) },
+                icon = { AppIcon(AppIcons.Qr) },
                 title = { Text("Отправить на приставку?", fontWeight = FontWeight.Black) },
                 text = {
                     Text(
@@ -471,7 +436,7 @@ private fun AddSheet(
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                AppIcon(AppIcons.Qr, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
                 Text("Сканировать QR-код")
             }
@@ -483,7 +448,7 @@ private fun AddSheet(
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(18.dp))
+                AppIcon(AppIcons.Qr, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
                 Text("Принять с другого устройства")
             }
@@ -515,3 +480,38 @@ private fun RowButtons(
     }
 }
 
+
+
+/** Нижняя навигация: Solar-иконки, выбранная чуть крупнее — без подпрыгивания. */
+@Composable
+private fun VeilNavigationBar(current: Tab, onSelect: (Tab) -> Unit) {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        Tab.entries.forEach { entry ->
+            NavigationBarItem(
+                selected = current == entry,
+                onClick = { onSelect(entry) },
+                icon = { TabIcon(entry = entry, selected = current == entry) },
+                label = { Text(entry.label) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TabIcon(entry: Tab, selected: Boolean) {
+    val pop by animateFloatAsState(
+        if (selected) 1.1f else 1f,
+        tween(180),
+        label = "nav-pop",
+    )
+    AppIcon(
+        icon = when (entry) {
+            Tab.SERVERS -> AppIcons.Server
+            Tab.SUBS -> AppIcons.Cloud
+            Tab.SETTINGS -> AppIcons.Settings
+        },
+        modifier = Modifier
+            .size(24.dp)
+            .graphicsLayer { scaleX = pop; scaleY = pop },
+    )
+}

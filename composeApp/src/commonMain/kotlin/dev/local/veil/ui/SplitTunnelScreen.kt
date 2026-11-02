@@ -34,15 +34,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Block
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -122,7 +113,7 @@ fun SplitTunnelScreen(
         item(key = "hint") {
             val warn = settings.splitMode == SplitMode.INCLUDE && settings.splitPackages.isEmpty()
             InfoCard(
-                icon = if (warn) Icons.Rounded.WarningAmber else Icons.Rounded.Info,
+                icon = if (warn) AppIcons.Danger else AppIcons.Info,
                 text = when {
                     warn -> "Отметьте хотя бы одно приложение — иначе в туннель нечего пускать."
                     settings.splitMode == SplitMode.OFF -> "Весь трафик идёт через VPN. Выберите «Кроме» или «Только», чтобы отметить приложения."
@@ -141,7 +132,7 @@ fun SplitTunnelScreen(
                 singleLine = true,
                 shape = RoundedCornerShape(999.dp),
                 placeholder = { Text("Поиск приложения") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                leadingIcon = { AppIcon(AppIcons.Search) },
                 trailingIcon = {
                     AnimatedVisibility(
                         visible = query.isNotEmpty(),
@@ -149,7 +140,7 @@ fun SplitTunnelScreen(
                         exit = scaleOut() + fadeOut(),
                     ) {
                         IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Очистить")
+                            AppIcon(AppIcons.Close, contentDescription = "Очистить")
                         }
                     }
                 },
@@ -281,9 +272,9 @@ fun SplitTunnelScreen(
 private data class ModeItem(val mode: SplitMode, val title: String, val subtitle: String, val icon: ImageVector)
 
 private val modeItems = listOf(
-    ModeItem(SplitMode.OFF, "Выкл", "Всё в VPN", Icons.Rounded.Public),
-    ModeItem(SplitMode.EXCLUDE, "Кроме", "Мимо VPN", Icons.Rounded.Block),
-    ModeItem(SplitMode.INCLUDE, "Только", "Только в VPN", Icons.Rounded.CheckCircle),
+    ModeItem(SplitMode.OFF, "Выкл", "Всё в VPN", AppIcons.Global),
+    ModeItem(SplitMode.EXCLUDE, "Кроме", "Мимо VPN", AppIcons.Block),
+    ModeItem(SplitMode.INCLUDE, "Только", "Только в VPN", AppIcons.Check),
 )
 
 /** Выбранная кнопка расширяется и округляется пружинно (Expressive). */
@@ -332,9 +323,8 @@ private fun ModeSelector(selected: SplitMode, onSelect: (SplitMode) -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Icon(
+                    AppIcon(
                         item.icon,
-                        contentDescription = null,
                         modifier = Modifier.size(26.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
                     )
                     Text(
@@ -382,7 +372,7 @@ private fun InfoCard(icon: ImageVector, text: String, warning: Boolean) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Icon(shownIcon, contentDescription = null)
+                AppIcon(shownIcon)
                 Text(shownText, style = MaterialTheme.typography.bodyMedium)
             }
         }
@@ -441,9 +431,8 @@ private fun CheckBadge(checked: Boolean, enabled: Boolean) {
             enter = scaleIn(tween(180)) + fadeIn(),
             exit = scaleOut() + fadeOut(),
         ) {
-            Icon(
-                Icons.Rounded.Check,
-                contentDescription = null,
+            AppIcon(
+                AppIcons.Check,
                 tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(18.dp),
             )

@@ -10,10 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -80,7 +76,7 @@ fun LogsScreen(
                     }
                 },
             ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                AppIcon(AppIcons.Refresh, modifier = Modifier.size(18.dp))
                 Text(" Обновить")
             }
             TextButton(
@@ -89,7 +85,7 @@ fun LogsScreen(
                     onBulletin("Лог скопирован в буфер обмена")
                 },
             ) {
-                Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                AppIcon(AppIcons.Copy, modifier = Modifier.size(18.dp))
                 Text(" Копировать")
             }
             TextButton(
@@ -101,7 +97,7 @@ fun LogsScreen(
                     }
                 },
             ) {
-                Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                AppIcon(AppIcons.Trash, modifier = Modifier.size(18.dp))
                 Text(" Очистить")
             }
         }
