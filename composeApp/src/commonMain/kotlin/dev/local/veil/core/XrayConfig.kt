@@ -35,6 +35,8 @@ data class TunnelOptions(
     val inboundName: String = "veil0",
     val fragment: Boolean = false,
     val bypassRu: Boolean = false,
+    /** Какое ядро запускать: AUTO выбирает по протоколу узла. */
+    val coreEngine: CoreEngine = CoreEngine.AUTO,
     /**
      * Есть ли в каталоге ядра geoip.dat и geosite.dat. Без них правило с
      * `geoip:`/`geosite:` не просто не сработает — ядро откажется стартовать

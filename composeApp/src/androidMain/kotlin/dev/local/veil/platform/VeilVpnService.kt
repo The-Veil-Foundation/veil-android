@@ -13,6 +13,7 @@ import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import dev.local.veil.MainActivity
 import dev.local.veil.R
+import dev.local.veil.core.CoreEngine
 import dev.local.veil.core.SplitMode
 import dev.local.veil.core.TunnelOptions
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +54,7 @@ class VeilVpnService : VpnService() {
         const val EXTRA_SPLIT_MODE = "split_mode"
         const val EXTRA_SPLIT_PACKAGES = "split_packages"
         const val EXTRA_LIVE_NOTIFICATION = "live_notification"
+        const val EXTRA_ENGINE = "engine"
 
         private val _status = MutableStateFlow(VpnStatus())
         val status: StateFlow<VpnStatus> = _status.asStateFlow()
@@ -74,6 +76,7 @@ class VeilVpnService : VpnService() {
             splitMode: SplitMode = SplitMode.OFF,
             splitPackages: Set<String> = emptySet(),
             liveNotification: Boolean = true,
+            engine: CoreEngine? = null,
         ) {
             val intent = Intent(context, VeilVpnService::class.java).apply {
                 action = ACTION_START
@@ -86,6 +89,7 @@ class VeilVpnService : VpnService() {
                 putExtra(EXTRA_SPLIT_MODE, splitMode.name)
                 putExtra(EXTRA_SPLIT_PACKAGES, splitPackages.toTypedArray())
                 putExtra(EXTRA_LIVE_NOTIFICATION, liveNotification)
+                putExtra(EXTRA_ENGINE, (engine ?: CoreEngine.XRAY).name)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -100,12 +104,14 @@ class VeilVpnService : VpnService() {
             serverName: String,
             splitMode: SplitMode? = null,
             splitPackages: Set<String>? = null,
+            engine: CoreEngine? = null,
         ) {
             context.startService(
                 Intent(context, VeilVpnService::class.java).apply {
                     action = ACTION_RELOAD
                     putExtra(EXTRA_CONFIG, configJson)
                     putExtra(EXTRA_SERVER, serverName)
+                    if (engine != null) putExtra(EXTRA_ENGINE, engine.name)
                     // Новые настройки раздельного туннеля применяются при пересоздании TUN.
                     if (splitMode != null && splitPackages != null) {
                         putExtra(EXTRA_SPLIT_MODE, splitMode.name)
@@ -139,14 +145,37 @@ class VeilVpnService : VpnService() {
      */
     private var coreFd: ParcelFileDescriptor? = null
 
+    /** Ядро, которым поднят текущий туннель. */
+    private var engine: CoreEngine = CoreEngine.XRAY
+
     /** Запускает ядро на дубликате TUN: перезапуск не убивает интерфейс. */
-    private fun startCore(configJson: String): Result<Unit> {
+    private fun startCore(configJson: String, core: CoreEngine = engine): Result<Unit> {
         val master = tun ?: return Result.failure(IllegalStateException("TUN не создан"))
         runCatching { coreFd?.close() }
         val child = ParcelFileDescriptor.dup(master.fileDescriptor)
         coreFd = child
-        return XrayBridge.start(configJson, child.fd, geoDirectory, 0)
+        engine = core
+        return when (core) {
+            CoreEngine.SING_BOX -> SingboxBridge.start(configJson, child.fd, geoDirectory, 0)
+            else -> XrayBridge.start(configJson, child.fd, geoDirectory, 0)
+        }
     }
+
+    private fun stopCores() {
+        runCatching { XrayBridge.stop() }
+        runCatching { SingboxBridge.stop() }
+    }
+
+    private fun coreVersion(core: CoreEngine = engine): String? = when (core) {
+        CoreEngine.SING_BOX -> SingboxBridge.version()
+        else -> XrayBridge.version()
+    }
+
+    private fun uplinkTotal(): Long =
+        if (engine == CoreEngine.SING_BOX) SingboxBridge.uplinkTotal() else XrayBridge.uplinkTotal()
+
+    private fun downlinkTotal(): Long =
+        if (engine == CoreEngine.SING_BOX) SingboxBridge.downlinkTotal() else XrayBridge.downlinkTotal()
 
     /** Параметры TUN: нужны, чтобы пересоздать интерфейс при смене узла. */
     private data class TunnelParams(
@@ -211,6 +240,7 @@ class VeilVpnService : VpnService() {
     private var lastConfig: String = ""
     private var lastServerName: String = ""
     private var lastLiveNotification: Boolean = true
+    private var lastEngine: CoreEngine = CoreEngine.XRAY
 
     /** Предыдущие счётчики — чтобы считать скорость в уведомлении. */
     private var lastDown = 0L
@@ -241,7 +271,9 @@ class VeilVpnService : VpnService() {
             if (newMode != null && newPackages != null) {
                 params = params?.copy(splitMode = newMode, splitPackages = newPackages)
             }
-            reload(config, serverName)
+            val newEngine = intent.getStringExtra(EXTRA_ENGINE)
+                ?.let { runCatching { CoreEngine.valueOf(it) }.getOrNull() }
+            reload(config, serverName, newEngine)
             return START_STICKY
         }
 
@@ -258,8 +290,11 @@ class VeilVpnService : VpnService() {
         }.getOrDefault(SplitMode.OFF)
         val splitPackages = intent?.getStringArrayExtra(EXTRA_SPLIT_PACKAGES)?.toSet().orEmpty()
         val liveNotification = intent?.getBooleanExtra(EXTRA_LIVE_NOTIFICATION, true) ?: true
+        val core = intent?.getStringExtra(EXTRA_ENGINE)
+            ?.let { runCatching { CoreEngine.valueOf(it) }.getOrNull() }
+            ?: CoreEngine.XRAY
 
-        connect(config, serverName, mtu, ipv6, dns, splitMode, splitPackages, liveNotification)
+        connect(config, serverName, mtu, ipv6, dns, splitMode, splitPackages, liveNotification, core)
         return START_STICKY
     }
 
@@ -272,6 +307,7 @@ class VeilVpnService : VpnService() {
         splitMode: SplitMode,
         splitPackages: Set<String>,
         liveNotification: Boolean,
+        core: CoreEngine,
     ) {
         publish(VpnStatus(VpnPhase.CONNECTING, serverName = serverName))
 
@@ -279,8 +315,12 @@ class VeilVpnService : VpnService() {
             fail("Пустой конфиг")
             return
         }
-        if (!XrayBridge.available) {
-            fail("xray.aar не подключён к сборке")
+        val available = when (core) {
+            CoreEngine.SING_BOX -> SingboxBridge.available
+            else -> XrayBridge.available
+        }
+        if (!available) {
+            fail("${core.label}: ядро не подключено к сборке")
             return
         }
 
@@ -294,10 +334,11 @@ class VeilVpnService : VpnService() {
                 return
             }
             tun = fd
+            engine = core
 
-            startCore(configJson)
+            startCore(configJson, core)
                 .getOrElse {
-                    fail("Xray не запустился: ${it.message}")
+                    fail("${core.label} не запустился: ${it.message}")
                     return
                 }
 
@@ -305,13 +346,14 @@ class VeilVpnService : VpnService() {
             activeServerName = serverName
             lastConfig = configJson
             lastServerName = serverName
+            lastEngine = core
             lastLiveNotification = liveNotification
             paused = false
             publish(
                 VpnStatus(
                     phase = VpnPhase.CONNECTED,
                     serverName = serverName,
-                    coreVersion = XrayBridge.version(),
+                    coreVersion = coreVersion(core),
                     connectedSince = connectedAt,
                 ),
             )
@@ -321,7 +363,7 @@ class VeilVpnService : VpnService() {
         }
     }
 
-    private fun reload(configJson: String, serverName: String) {
+    private fun reload(configJson: String, serverName: String, newEngine: CoreEngine? = null) {
         val fd = tun
         if (fd == null || configJson.isBlank()) {
             stop(this)
@@ -330,7 +372,7 @@ class VeilVpnService : VpnService() {
 
         publish(VpnStatus(VpnPhase.CONNECTING, serverName = serverName))
         try {
-            XrayBridge.stop()
+            stopCores()
             runCatching { coreFd?.close() }
             coreFd = null
             runCatching { tun?.close() }
@@ -344,10 +386,11 @@ class VeilVpnService : VpnService() {
                 return
             }
             tun = fresh
+            val core = newEngine ?: engine
 
-            startCore(configJson)
+            startCore(configJson, core)
                 .getOrElse {
-                    fail("Перезапуск ядра не удался: ${it.message}")
+                    fail("${core.label} не запустился: ${it.message}")
                     return
                 }
             // Время сессии не обнуляем: смена узла не должна выглядеть
@@ -356,13 +399,14 @@ class VeilVpnService : VpnService() {
             activeServerName = serverName
             lastConfig = configJson
             lastServerName = serverName
+            lastEngine = core
             paused = false
             lastTick = 0L
             publish(
                 VpnStatus(
                     phase = VpnPhase.CONNECTED,
                     serverName = serverName,
-                    coreVersion = XrayBridge.version(),
+                    coreVersion = coreVersion(core),
                     connectedSince = connectedAt,
                 ),
             )
@@ -389,7 +433,7 @@ class VeilVpnService : VpnService() {
     private fun pause() {
         if (paused || tun == null) return
         paused = true
-        runCatching { XrayBridge.stop() }
+        stopCores()
         runCatching { coreFd?.close() }
         coreFd = null
         lastTick = 0L
@@ -405,7 +449,7 @@ class VeilVpnService : VpnService() {
             stopSelf()
             return
         }
-        startCore(lastConfig)
+        startCore(lastConfig, lastEngine)
             .onFailure {
                 paused = false
                 fail("Возобновление не удалось: ${it.message}")
@@ -416,7 +460,7 @@ class VeilVpnService : VpnService() {
             VpnStatus(
                 phase = VpnPhase.CONNECTED,
                 serverName = activeServerName,
-                coreVersion = XrayBridge.version(),
+                coreVersion = coreVersion(lastEngine),
                 connectedSince = connectedAt,
             ),
         )
@@ -426,7 +470,7 @@ class VeilVpnService : VpnService() {
     private fun teardown(resetStatus: Boolean) {
         notificationJob?.cancel()
         notificationJob = null
-        runCatching { XrayBridge.stop() }
+        stopCores()
         runCatching { coreFd?.close() }
         coreFd = null
         runCatching { tun?.close() }
@@ -466,8 +510,8 @@ class VeilVpnService : VpnService() {
         val now = System.currentTimeMillis()
         val seconds = ((now - connectedAt) / 1000).coerceAtLeast(0)
         val subtitle = if (live && !paused) {
-            val down = XrayBridge.downlinkTotal()
-            val up = XrayBridge.uplinkTotal()
+            val down = downlinkTotal()
+            val up = uplinkTotal()
             val elapsed = if (lastTick == 0L) 1.0 else ((now - lastTick) / 1000.0).coerceAtLeast(0.2)
             val downSpeed = if (lastTick == 0L) 0L else ((down - lastDown) / elapsed).toLong()
             val upSpeed = if (lastTick == 0L) 0L else ((up - lastUp) / elapsed).toLong()

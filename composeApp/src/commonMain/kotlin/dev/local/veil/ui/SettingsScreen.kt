@@ -114,10 +114,16 @@ fun SettingsScreen(
                     SegmentChoice(
                         title = "Движок",
                         subtitle = when (settings.coreEngine) {
+                            CoreEngine.AUTO -> state.selected?.let {
+                                "Авто — сейчас ${settings.coreEngine.resolve(it).label}"
+                            } ?: "Авто — по протоколу узла"
                             CoreEngine.XRAY -> "Xray-core — проверенное ядро"
                             CoreEngine.SING_BOX -> "sing-box — новые протоколы"
                         },
                         options = listOf(
+                            SegmentOption("Авто", settings.coreEngine == CoreEngine.AUTO) {
+                                state.saveSettings(settings.copy(coreEngine = CoreEngine.AUTO))
+                            },
                             SegmentOption("Xray", settings.coreEngine == CoreEngine.XRAY) {
                                 state.saveSettings(settings.copy(coreEngine = CoreEngine.XRAY))
                             },

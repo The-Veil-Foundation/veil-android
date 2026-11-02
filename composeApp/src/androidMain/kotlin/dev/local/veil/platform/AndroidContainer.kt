@@ -6,11 +6,14 @@ import android.content.Context
 import android.net.VpnService
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import dev.local.veil.core.CoreEngine
 import dev.local.veil.core.ProxyConfig
+import dev.local.veil.core.SingboxConfig
 import dev.local.veil.core.Subscription
 import dev.local.veil.core.TunnelOptions
 import dev.local.veil.core.XrayInbound
 import dev.local.veil.core.XrayConfig
+import dev.local.veil.core.xrayCompatible
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,11 +46,19 @@ class AndroidVpnController(
     private val _status = MutableStateFlow(VpnStatus())
     override val status: StateFlow<VpnStatus> = _status.asStateFlow()
 
-    override val coreAvailable: Boolean get() = XrayBridge.available
-    override val coreVersion: String? get() = XrayBridge.version()
+    override val coreAvailable: Boolean get() = XrayBridge.available || SingboxBridge.available
+    override val coreVersion: String?
+        get() = when {
+            SingboxBridge.available -> SingboxBridge.version()
+            XrayBridge.available -> XrayBridge.version()
+            else -> null
+        }
 
     private var pollJob: Job? = null
     private var pendingPermission: CompletableDeferred<Boolean>? = null
+
+    /** Ядро текущего туннеля — от него зависят счётчики трафика. */
+    private var activeEngine: CoreEngine = CoreEngine.XRAY
 
     private val permissionLauncher =
         activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -67,13 +78,20 @@ class AndroidVpnController(
     override suspend fun connect(server: ProxyConfig, options: TunnelOptions): Result<Unit> =
         runCatching {
             val effective = if (logFile.isNotEmpty()) options.copy(logFile = logFile) else options
-            val config = resolveEndpoints(XrayConfig.json(server.copy(id = server.id), effective))
-            if (!coreAvailable) error("xray.aar не подключён к сборке")
-            if (!server.isUsable) error("Протокол ${server.proto.wire} не поддерживается Xray")
+            val engine = engineFor(server, effective)
+            val config = configFor(server, effective, engine)
+            if (!coreAvailable) error("ядро не подключено к сборке")
+            if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) {
+                error("Для ${server.proto.wire} нужно ядро sing-box — оно ещё не подключено к сборке")
+            }
+            if (engine == CoreEngine.XRAY && !server.xrayCompatible) {
+                error("Протокол ${server.proto.wire} не поддерживается Xray")
+            }
             if (!ensurePermission()) error("Разрешение на VPN не выдано")
 
             // Каждая новая сессия начинается с чистого лога.
-            if (logFile.isNotEmpty()) XrayBridge.prepareLog(logFile)
+            if (logFile.isNotEmpty()) prepareLog(engine, logFile)
+            activeEngine = engine
 
             val settings = settingsStore.load()
             VeilVpnService.start(
@@ -85,8 +103,33 @@ class AndroidVpnController(
                 splitMode = settings.splitMode,
                 splitPackages = settings.splitPackages,
                 liveNotification = settings.liveNotification,
+                engine = engine,
             )
         }
+
+    /** Каким ядром поднимать узел: AUTO выбирает по протоколу и транспорту. */
+    private fun engineFor(server: ProxyConfig, options: TunnelOptions): CoreEngine =
+        options.coreEngine.resolve(server)
+
+    private suspend fun configFor(
+        server: ProxyConfig,
+        options: TunnelOptions,
+        engine: CoreEngine,
+    ): String = when (engine) {
+        // Резолвер понимает только форму Xray; sing-box пока получает конфиг как есть.
+        CoreEngine.SING_BOX -> SingboxConfig.build(server, options).toString()
+        else -> resolveEndpoints(XrayConfig.json(server, options))
+    }
+
+    private fun prepareLog(engine: CoreEngine, path: String) {
+        if (engine == CoreEngine.SING_BOX) SingboxBridge.prepareLog(path) else XrayBridge.prepareLog(path)
+    }
+
+    private fun upTotal(): Long =
+        if (activeEngine == CoreEngine.SING_BOX) SingboxBridge.uplinkTotal() else XrayBridge.uplinkTotal()
+
+    private fun downTotal(): Long =
+        if (activeEngine == CoreEngine.SING_BOX) SingboxBridge.downlinkTotal() else XrayBridge.downlinkTotal()
 
     /** Пробное ядро одно на всё приложение, поэтому проверки идут строго по очереди. */
     private val probeMutex = Mutex()
@@ -106,18 +149,36 @@ class AndroidVpnController(
             // файле мешали бы друг другу.
             val probeLog = logFile.takeIf { it.isNotEmpty() }?.let { "$it.probe" }
             val effective = options.copy(logFile = probeLog, logLevel = "debug")
+            val engine = engineFor(server, effective)
+            if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) return@withContext null
             val port = 21000 + (System.nanoTime() % 500).toInt()
             // Одноразовый логин/пароль: пока идёт проверка, чужое приложение
             // на телефоне не сможет пустить трафик через этот SOCKS.
             val rnd = java.security.SecureRandom()
             val user = "p" + java.math.BigInteger(64, rnd).toString(16)
             val pass = java.math.BigInteger(128, rnd).toString(16)
-            val config = resolveEndpoints(
-                XrayConfig.json(server, effective, XrayInbound.LocalProxy(socks = port, http = port + 1, user = user, pass = pass)),
-                dump = false,
-            )
+            val config = when (engine) {
+                CoreEngine.SING_BOX -> SingboxConfig.build(
+                    server,
+                    effective,
+                    SingboxConfig.Inbound.LocalProxy(socks = port, user = user, pass = pass),
+                ).toString()
+                else -> resolveEndpoints(
+                    XrayConfig.json(
+                        server,
+                        effective,
+                        XrayInbound.LocalProxy(socks = port, http = port + 1, user = user, pass = pass),
+                    ),
+                    dump = false,
+                )
+            }
             try {
-                XrayBridge.startProbe(config, geoDirectory)
+                val started = if (engine == CoreEngine.SING_BOX) {
+                    SingboxBridge.startProbe(config, geoDirectory)
+                } else {
+                    XrayBridge.startProbe(config, geoDirectory)
+                }
+                started
                     .onFailure { android.util.Log.w("VeilXray", "пробное ядро не поднялось: ${it.message}") }
                     .getOrElse { return@withContext null }
                 java.net.Authenticator.setDefault(object : java.net.Authenticator() {
@@ -127,7 +188,11 @@ class AndroidVpnController(
                 block(port)
             } finally {
                 java.net.Authenticator.setDefault(null)
-                runCatching { XrayBridge.stopProbe() }
+                if (engine == CoreEngine.SING_BOX) {
+                    runCatching { SingboxBridge.stopProbe() }
+                } else {
+                    runCatching { XrayBridge.stopProbe() }
+                }
             }
         }
     }
@@ -191,13 +256,20 @@ class AndroidVpnController(
      */
     override suspend fun reconnect(server: ProxyConfig, options: TunnelOptions): Result<Unit> =
         runCatching {
-            if (!coreAvailable) error("xray.aar не подключён к сборке")
-            if (!server.isUsable) error("Протокол ${server.proto.wire} не поддерживается Xray")
+            if (!coreAvailable) error("ядро не подключено к сборке")
 
             val effective = if (logFile.isNotEmpty()) options.copy(logFile = logFile) else options
+            val engine = engineFor(server, effective)
+            if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) {
+                error("Для ${server.proto.wire} нужно ядро sing-box — оно ещё не подключено к сборке")
+            }
+            if (engine == CoreEngine.XRAY && !server.xrayCompatible) {
+                error("Протокол ${server.proto.wire} не поддерживается Xray")
+            }
+            val config = configFor(server, effective, engine)
+            activeEngine = engine
 
             if (_status.value.isConnected) {
-                val config = resolveEndpoints(XrayConfig.json(server, effective))
                 val settings = settingsStore.load()
                 VeilVpnService.reload(
                     activity.applicationContext,
@@ -205,19 +277,21 @@ class AndroidVpnController(
                     server.name,
                     splitMode = settings.splitMode,
                     splitPackages = settings.splitPackages,
+                    engine = engine,
                 )
             } else {
                 if (!ensurePermission()) error("Разрешение на VPN не выдано")
                 val settings = settingsStore.load()
                 VeilVpnService.start(
                     context = activity.applicationContext,
-                    configJson = resolveEndpoints(XrayConfig.json(server, effective)),
+                    configJson = config,
                     serverName = server.name,
                     options = options,
                     geoDirectory = geoDirectory,
                     splitMode = settings.splitMode,
                     splitPackages = settings.splitPackages,
                     liveNotification = settings.liveNotification,
+                    engine = engine,
                 )
             }
         }
@@ -248,9 +322,9 @@ class AndroidVpnController(
 
     private fun VpnStatus.withCounters(): VpnStatus =
         if (isConnected) copy(
-            coreVersion = coreVersion ?: XrayBridge.version(),
-            uplink = XrayBridge.uplinkTotal(),
-            downlink = XrayBridge.downlinkTotal(),
+            coreVersion = coreVersion ?: this@AndroidVpnController.coreVersion,
+            uplink = upTotal(),
+            downlink = downTotal(),
         ) else copy(uplink = 0, downlink = 0)
 
     private fun startPolling() {
@@ -261,8 +335,8 @@ class AndroidVpnController(
             var lastAt = 0L
             while (isActive) {
                 delay(1000)
-                val up = XrayBridge.uplinkTotal()
-                val down = XrayBridge.downlinkTotal()
+                val up = upTotal()
+                val down = downTotal()
                 val now = System.currentTimeMillis()
                 val seconds = if (lastAt == 0L) 1.0
                 else ((now - lastAt) / 1000.0).coerceAtLeast(0.2)

@@ -2,12 +2,35 @@ package dev.local.veil.core
 
 import kotlinx.serialization.Serializable
 
-/** Ядро прокси: Xray или sing-box. */
+/** Ядро прокси: авто, Xray или sing-box. */
 @Serializable
 enum class CoreEngine {
+    /** Само выбирает ядро по протоколу узла. */
+    AUTO,
     XRAY,
     SING_BOX,
+    ;
+
+    /** Сводит режим к конкретному ядру для этого узла. */
+    fun resolve(server: ProxyConfig): CoreEngine = when (this) {
+        AUTO -> if (server.xrayCompatible) XRAY else SING_BOX
+        else -> this
+    }
+
+    val label: String
+        get() = when (this) {
+            AUTO -> "Авто"
+            XRAY -> "Xray"
+            SING_BOX -> "sing-box"
+        }
 }
+
+/**
+ * Узел умеет работать на Xray: протокол поддерживается. XHTTP тоже остаётся
+ * за Xray — в sing-box его нет.
+ */
+val ProxyConfig.xrayCompatible: Boolean
+    get() = proto.xraySupported
 
 /** Как приложения распределяются между туннелем и обычной сетью. */
 @Serializable
@@ -24,7 +47,7 @@ enum class SplitMode {
 
 @Serializable
 data class AppSettings(
-    val coreEngine: CoreEngine = CoreEngine.XRAY,
+    val coreEngine: CoreEngine = CoreEngine.AUTO,
     val mtu: Int = 1500,
     val ipv6: Boolean = true,
     val dns: List<String> = listOf("1.1.1.1", "1.0.0.1"),
@@ -50,6 +73,7 @@ data class AppSettings(
         dnsServers = dns,
         fragment = fragment,
         bypassRu = bypassRu,
+        coreEngine = coreEngine,
     )
 }
 
