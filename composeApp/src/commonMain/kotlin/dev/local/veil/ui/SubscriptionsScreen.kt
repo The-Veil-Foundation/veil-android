@@ -1,5 +1,27 @@
 package dev.local.veil.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,6 +63,7 @@ fun SubscriptionsScreen(
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
+    val seen = remember { mutableSetOf<Any>() }
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -65,9 +88,21 @@ fun SubscriptionsScreen(
                     enabled = input.isNotBlank() && !state.busy,
                     shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.weight(1f),
-                ) { Text(if (state.busy) "Загружаю…" else "Добавить", fontWeight = FontWeight.Bold) }
+                ) {
+                    AnimatedContent(
+                        targetState = state.busy,
+                        transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(180)) },
+                        label = "add-label",
+                    ) { busy ->
+                        Text(if (busy) "Загружаю…" else "Добавить", fontWeight = FontWeight.Bold)
+                    }
+                }
 
-                if (state.subscriptions.isNotEmpty()) {
+                AnimatedVisibility(
+                    visible = state.subscriptions.isNotEmpty(),
+                    enter = scaleIn(tween(180)) + fadeIn(),
+                    exit = scaleOut() + fadeOut(),
+                ) {
                     TextButton(onClick = state::refreshAll, enabled = !state.busy) {
                         Text(if (state.busy) "…" else "Все")
                     }
@@ -79,8 +114,19 @@ fun SubscriptionsScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(state.subscriptions, key = { it.url }) { subscription ->
+            if (state.subscriptions.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        text = "Подписок пока нет.\nВставьте ссылку выше и нажмите «Добавить».",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.staggerIn(seen, "empty", 0).padding(24.dp),
+                    )
+                }
+            }
+            itemsIndexed(state.subscriptions, key = { _, it -> it.url }) { index, subscription ->
                 SubscriptionCardRow(
+                    modifier = Modifier.animateItem(),
                     subscription = subscription,
                     busy = state.busy,
                     onRefresh = { state.refreshSubscription(subscription) },
@@ -97,13 +143,19 @@ private fun SubscriptionCardRow(
     busy: Boolean,
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(
+            Modifier
+                .animateContentSize(tween(180))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = maskUrl(subscription.url),
@@ -144,10 +196,19 @@ private fun SubscriptionUsageBlock(subscription: Subscription) {
     val leftDays = daysUntil(subscription.expireAt)
     val expiringSoon = leftDays <= 3
 
+    // Полоса «наполняется» при появлении карточки, а не появляется сразу полной.
+    var target by remember { mutableStateOf(0f) }
+    LaunchedEffect(fraction) { target = fraction }
+    val animated by animateFloatAsState(
+        targetValue = target,
+        animationSpec = tween(180),
+        label = "usage",
+    )
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (total > 0) {
             LinearProgressIndicator(
-                progress = { fraction },
+                progress = { animated },
                 modifier = Modifier.fillMaxWidth().height(6.dp),
                 color = if (fraction > 0.9f) MaterialTheme.colorScheme.error
                 else MaterialTheme.colorScheme.primary,

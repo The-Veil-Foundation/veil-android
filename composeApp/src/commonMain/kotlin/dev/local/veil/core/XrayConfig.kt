@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -14,7 +15,13 @@ import kotlinx.serialization.json.putJsonObject
 /** Куда ядро смотрит за трафиком. */
 sealed interface XrayInbound {
     data class Tun(val name: String = "veil0", val mtu: Int = 1500) : XrayInbound
-    data class LocalProxy(val socks: Int = 10808, val http: Int = 10809) : XrayInbound
+    /** Если [user] задан, SOCKS и HTTP требуют логин и пароль: другие приложения на телефоне порт не используют. */
+    data class LocalProxy(
+        val socks: Int = 10808,
+        val http: Int = 10809,
+        val user: String? = null,
+        val pass: String? = null,
+    ) : XrayInbound
 }
 
 /** Настройки, которые влияют на конфиг туннеля. */
@@ -28,6 +35,12 @@ data class TunnelOptions(
     val inboundName: String = "veil0",
     val fragment: Boolean = false,
     val bypassRu: Boolean = false,
+    /**
+     * Есть ли в каталоге ядра geoip.dat и geosite.dat. Без них правило с
+     * `geoip:`/`geosite:` не просто не сработает — ядро откажется стартовать
+     * («failed to open geoip.dat»), поэтому такие матчеры вырезаются.
+     */
+    val geoAvailable: Boolean = false,
 )
 
 /**
@@ -85,16 +98,7 @@ object XrayConfig {
                     // а `geoip:private` без него роняет весь конфиг.
                     addJsonObject {
                         put("type", "field")
-                        putJsonArray("ip") {
-                            add("10.0.0.0/8")
-                            add("172.16.0.0/12")
-                            add("192.168.0.0/16")
-                            add("169.254.0.0/16")
-                            add("127.0.0.0/8")
-                            add("fc00::/7")
-                            add("fe80::/10")
-                            add("::1/128")
-                        }
+                        putJsonArray("ip") { PRIVATE_NETWORKS.forEach { add(it) } }
                         put("outboundTag", TAG_DIRECT)
                     }
                     if (options.bypassRu) {
@@ -141,9 +145,98 @@ object XrayConfig {
         val mutable = doc.toMutableMap()
         mutable["log"] = logJson(options)
         mutable["inbounds"] = JsonArray(inboundList(inbound))
+        if (!options.geoAvailable) {
+            (mutable["routing"] as? JsonObject)?.let { mutable["routing"] = withoutGeoRouting(it) }
+            (mutable["dns"] as? JsonObject)?.let { mutable["dns"] = withoutGeoDns(it) }
+        }
         if (!mutable.containsKey("stats")) mutable["stats"] = JsonObject(emptyMap())
         if (!mutable.containsKey("policy")) mutable["policy"] = policyJson()
         return JsonObject(mutable)
+    }
+
+    /* ---------------- geo-матчеры без базы ---------------- */
+
+    /** То, что значит `geoip:private`, перечисленное явно. */
+    private val PRIVATE_NETWORKS = listOf(
+        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+        "127.0.0.0/8", "fc00::/7", "fe80::/10", "::1/128",
+    )
+
+    /** Домены из `geosite:private`: имена, которые существуют только в локальной сети. */
+    private val PRIVATE_DOMAINS = listOf(
+        "full:localhost", "domain:local", "domain:localdomain", "domain:lan", "domain:home.arpa",
+    )
+
+    /** Поля правила, где допустимы geo-матчеры. */
+    private val GEO_RULE_FIELDS = listOf("domain", "domains", "ip", "source", "sourceIP", "localIP")
+
+    private fun isGeoToken(token: String) =
+        token.startsWith("geoip:") || token.startsWith("geosite:") ||
+            token.startsWith("ext:") || token.startsWith("ext-ip:") || token.startsWith("ext-domain:")
+
+    /**
+     * Список матчеров без geo-токенов. `private` заменяется явными значениями,
+     * остальные geo-токены убираются. null — в списке остались только они:
+     * без них правило превратилось бы в «всё подряд».
+     */
+    private fun withoutGeoTokens(list: JsonArray): JsonArray? {
+        var touched = false
+        val out = ArrayList<JsonElement>()
+        for (item in list) {
+            val token = (item as? JsonPrimitive)?.takeIf { it.isString }?.content
+            when {
+                token == null -> out.add(item)
+                token == "geoip:private" -> {
+                    touched = true
+                    PRIVATE_NETWORKS.forEach { out.add(JsonPrimitive(it)) }
+                }
+                token == "geosite:private" -> {
+                    touched = true
+                    PRIVATE_DOMAINS.forEach { out.add(JsonPrimitive(it)) }
+                }
+                isGeoToken(token) -> touched = true
+                else -> out.add(item)
+            }
+        }
+        return if (out.isEmpty() && touched) null else JsonArray(out)
+    }
+
+    /** Правило без geo-матчеров; null — убрать его целиком, чтобы оно не расширилось. */
+    private fun withoutGeoRule(rule: JsonObject): JsonObject? {
+        val out = rule.toMutableMap()
+        for (field in GEO_RULE_FIELDS) {
+            val list = rule[field] as? JsonArray ?: continue
+            out[field] = withoutGeoTokens(list) ?: return null
+        }
+        return JsonObject(out)
+    }
+
+    private fun withoutGeoRouting(routing: JsonObject): JsonObject {
+        val rules = routing["rules"] as? JsonArray ?: return routing
+        val kept = rules.mapNotNull { rule -> if (rule is JsonObject) withoutGeoRule(rule) else rule }
+        return JsonObject(routing.toMutableMap().apply { put("rules", JsonArray(kept)) })
+    }
+
+    private fun withoutGeoDns(dns: JsonObject): JsonObject {
+        val out = dns.toMutableMap()
+        (dns["servers"] as? JsonArray)?.let { servers ->
+            out["servers"] = JsonArray(
+                servers.mapNotNull { server ->
+                    if (server !is JsonObject) return@mapNotNull server
+                    val copy = server.toMutableMap()
+                    for (field in listOf("domains", "expectIPs", "expectedIPs", "unexpectedIPs")) {
+                        val list = server[field] as? JsonArray ?: continue
+                        // Резолвер, который отвечал только за geo-список, убираем целиком.
+                        copy[field] = withoutGeoTokens(list) ?: return@mapNotNull null
+                    }
+                    JsonObject(copy)
+                },
+            )
+        }
+        (dns["hosts"] as? JsonObject)?.let { hosts ->
+            out["hosts"] = JsonObject(hosts.filterKeys { !isGeoToken(it) })
+        }
+        return JsonObject(out)
     }
 
     private fun logJson(options: TunnelOptions): JsonObject = buildJsonObject {
@@ -188,7 +281,14 @@ object XrayConfig {
                 put("protocol", "socks")
                 putJsonObject("settings") {
                     put("udp", true)
-                    put("auth", "noauth")
+                    if (inbound.user != null && inbound.pass != null) {
+                        put("auth", "password")
+                        putJsonArray("accounts") {
+                            add(buildJsonObject { put("user", inbound.user); put("pass", inbound.pass) })
+                        }
+                    } else {
+                        put("auth", "noauth")
+                    }
                 }
                 putJsonObject("sniffing") {
                     put("enabled", true)
@@ -200,6 +300,13 @@ object XrayConfig {
                 put("listen", "127.0.0.1")
                 put("port", inbound.http)
                 put("protocol", "http")
+                if (inbound.user != null && inbound.pass != null) {
+                    putJsonObject("settings") {
+                        putJsonArray("accounts") {
+                            add(buildJsonObject { put("user", inbound.user); put("pass", inbound.pass) })
+                        }
+                    }
+                }
                 putJsonObject("sniffing") {
                     put("enabled", true)
                     putJsonArray("destOverride") { add("http"); add("tls") }

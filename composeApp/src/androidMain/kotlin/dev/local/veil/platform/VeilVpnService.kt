@@ -1,10 +1,12 @@
 package dev.local.veil.platform
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -41,6 +43,7 @@ class VeilVpnService : VpnService() {
         const val ACTION_START = "dev.local.veil.START"
         const val ACTION_STOP = "dev.local.veil.STOP"
         const val ACTION_RELOAD = "dev.local.veil.RELOAD"
+        const val ACTION_PAUSE = "dev.local.veil.PAUSE"
         const val EXTRA_CONFIG = "config"
         const val EXTRA_MTU = "mtu"
         const val EXTRA_IPV6 = "ipv6"
@@ -91,12 +94,23 @@ class VeilVpnService : VpnService() {
             }
         }
 
-        fun reload(context: Context, configJson: String, serverName: String) {
+        fun reload(
+            context: Context,
+            configJson: String,
+            serverName: String,
+            splitMode: SplitMode? = null,
+            splitPackages: Set<String>? = null,
+        ) {
             context.startService(
                 Intent(context, VeilVpnService::class.java).apply {
                     action = ACTION_RELOAD
                     putExtra(EXTRA_CONFIG, configJson)
                     putExtra(EXTRA_SERVER, serverName)
+                    // Новые настройки раздельного туннеля применяются при пересоздании TUN.
+                    if (splitMode != null && splitPackages != null) {
+                        putExtra(EXTRA_SPLIT_MODE, splitMode.name)
+                        putExtra(EXTRA_SPLIT_PACKAGES, splitPackages.toTypedArray())
+                    }
                 },
             )
         }
@@ -104,6 +118,13 @@ class VeilVpnService : VpnService() {
         fun stop(context: Context) {
             context.startService(
                 Intent(context, VeilVpnService::class.java).apply { action = ACTION_STOP },
+            )
+        }
+
+        /** Переключает паузу: из уведомления и из приложения. */
+        fun togglePause(context: Context) {
+            context.startService(
+                Intent(context, VeilVpnService::class.java).apply { action = ACTION_PAUSE },
             )
         }
     }
@@ -155,15 +176,25 @@ class VeilVpnService : VpnService() {
         }
 
         params.dns.forEach { builder.addDnsServer(it) }
-        runCatching { builder.addDisallowedApplication(packageName) }
 
+        // Android не позволяет смешивать «разрешённые» и «запрещённые» приложения:
+        // addAllowedApplication после addDisallowedApplication кидает исключение,
+        // а раньше оно глоталось через runCatching — режим «Только» не работал.
+        // Само приложение в режиме INCLUDE и так мимо туннеля (его нет в списке).
+        val others = params.splitPackages.filter { it != packageName }
         when (params.splitMode) {
-            SplitMode.OFF -> Unit
-            SplitMode.EXCLUDE -> params.splitPackages.forEach { pkg ->
-                if (pkg != packageName) runCatching { builder.addDisallowedApplication(pkg) }
+            SplitMode.OFF -> runCatching { builder.addDisallowedApplication(packageName) }
+            SplitMode.EXCLUDE -> {
+                runCatching { builder.addDisallowedApplication(packageName) }
+                others.forEach { pkg -> runCatching { builder.addDisallowedApplication(pkg) } }
             }
-            SplitMode.INCLUDE -> params.splitPackages.forEach { pkg ->
-                if (pkg != packageName) runCatching { builder.addAllowedApplication(pkg) }
+            SplitMode.INCLUDE -> {
+                val added = others.count { pkg -> runCatching { builder.addAllowedApplication(pkg) }.isSuccess }
+                // Пустой список allowed означает «все приложения» — это петля для ядра
+                // и обратное тому, что просил пользователь.
+                if (added == 0) {
+                    throw IllegalStateException("Режим «Только»: не выбрано ни одного установленного приложения")
+                }
             }
         }
 
@@ -172,6 +203,14 @@ class VeilVpnService : VpnService() {
 
     /** Имя узла, к которому подключены сейчас: его показывает уведомление. */
     private var activeServerName: String = ""
+
+    /** Состояние паузы: ядро остановлено, TUN остаётся поднят — трафик не течёт. */
+    private var paused = false
+
+    /** Последний конфиг/имя/режим уведомления — чтобы возобновить после паузы. */
+    private var lastConfig: String = ""
+    private var lastServerName: String = ""
+    private var lastLiveNotification: Boolean = true
 
     /** Предыдущие счётчики — чтобы считать скорость в уведомлении. */
     private var lastDown = 0L
@@ -188,14 +227,25 @@ class VeilVpnService : VpnService() {
             return START_NOT_STICKY
         }
 
+        if (intent?.action == ACTION_PAUSE) {
+            if (paused) resume() else pause()
+            return START_STICKY
+        }
+
         if (intent?.action == ACTION_RELOAD) {
             val config = intent.getStringExtra(EXTRA_CONFIG).orEmpty()
             val serverName = intent.getStringExtra(EXTRA_SERVER).orEmpty()
+            val newMode = intent.getStringExtra(EXTRA_SPLIT_MODE)
+                ?.let { runCatching { SplitMode.valueOf(it) }.getOrNull() }
+            val newPackages = intent.getStringArrayExtra(EXTRA_SPLIT_PACKAGES)?.toSet()
+            if (newMode != null && newPackages != null) {
+                params = params?.copy(splitMode = newMode, splitPackages = newPackages)
+            }
             reload(config, serverName)
             return START_STICKY
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification("Подключение…", null, ongoing = true))
+        startForeground(NOTIFICATION_ID, buildNotification("Подключение…", null, 0))
 
         val config = intent?.getStringExtra(EXTRA_CONFIG).orEmpty()
         val serverName = intent?.getStringExtra(EXTRA_SERVER).orEmpty()
@@ -253,6 +303,10 @@ class VeilVpnService : VpnService() {
 
             connectedAt = System.currentTimeMillis()
             activeServerName = serverName
+            lastConfig = configJson
+            lastServerName = serverName
+            lastLiveNotification = liveNotification
+            paused = false
             publish(
                 VpnStatus(
                     phase = VpnPhase.CONNECTED,
@@ -300,6 +354,9 @@ class VeilVpnService : VpnService() {
             // как новое подключение.
             if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
             activeServerName = serverName
+            lastConfig = configJson
+            lastServerName = serverName
+            paused = false
             lastTick = 0L
             publish(
                 VpnStatus(
@@ -316,21 +373,54 @@ class VeilVpnService : VpnService() {
     }
 
     /**
-     * Живое уведомление: раз в секунду обновляет трафик и время, вместо
-     * статичной плашки «Защищено».
+     * Уведомление больше не «живое»: обновляется только при смене состояния
+     * (подключение, пауза, ошибка), а не каждую секунду.
      */
     private fun startLiveNotification(serverName: String, enabled: Boolean) {
         notificationJob?.cancel()
-        if (!enabled) {
-            notify(serverName, live = false)
+        notificationJob = null
+        notify(activeServerName.ifEmpty { serverName }, live = false)
+    }
+
+    /**
+     * Пауза: останавливаем ядро, но TUN оставляем поднятым — пакеты не текут
+     * (без утечки), соединение готово мгновенно возобновиться.
+     */
+    private fun pause() {
+        if (paused || tun == null) return
+        paused = true
+        runCatching { XrayBridge.stop() }
+        runCatching { coreFd?.close() }
+        coreFd = null
+        lastTick = 0L
+        publish(VpnStatus(VpnPhase.PAUSED, serverName = activeServerName, connectedSince = connectedAt))
+        notify(activeServerName, live = false)
+    }
+
+    /** Возобновление: перезапуск ядра на том же TUN-дескрипторе. */
+    private fun resume() {
+        if (!paused) return
+        if (tun == null) {
+            teardown(resetStatus = true)
+            stopSelf()
             return
         }
-        notificationJob = serviceScope.launch {
-            while (isActive) {
-                notify(activeServerName.ifEmpty { serverName }, live = true)
-                delay(1000)
+        startCore(lastConfig)
+            .onFailure {
+                paused = false
+                fail("Возобновление не удалось: ${it.message}")
+                return
             }
-        }
+        paused = false
+        publish(
+            VpnStatus(
+                phase = VpnPhase.CONNECTED,
+                serverName = activeServerName,
+                coreVersion = XrayBridge.version(),
+                connectedSince = connectedAt,
+            ),
+        )
+        startLiveNotification(activeServerName, lastLiveNotification)
     }
 
     private fun teardown(resetStatus: Boolean) {
@@ -373,9 +463,9 @@ class VeilVpnService : VpnService() {
 
     private fun notify(text: String, live: Boolean) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val subtitle = if (live) {
-            val now = System.currentTimeMillis()
-            val seconds = ((now - connectedAt) / 1000).coerceAtLeast(0)
+        val now = System.currentTimeMillis()
+        val seconds = ((now - connectedAt) / 1000).coerceAtLeast(0)
+        val subtitle = if (live && !paused) {
             val down = XrayBridge.downlinkTotal()
             val up = XrayBridge.uplinkTotal()
             val elapsed = if (lastTick == 0L) 1.0 else ((now - lastTick) / 1000.0).coerceAtLeast(0.2)
@@ -385,16 +475,19 @@ class VeilVpnService : VpnService() {
             lastDown = down
             lastUp = up
             "↓ ${formatSpeed(downSpeed)} · ↑ ${formatSpeed(upSpeed)} · ${formatDuration(seconds)}"
+        } else if (paused) {
+            "Пауза · ${formatDuration(seconds)}"
         } else {
             null
         }
-        manager.notify(NOTIFICATION_ID, buildNotification(text, subtitle, ongoing = true))
+        manager.notify(NOTIFICATION_ID, buildNotification(text, subtitle, seconds))
     }
 
+    @Suppress("DEPRECATION")
     private fun buildNotification(
         text: String,
         subtitle: String?,
-        ongoing: Boolean,
+        seconds: Long,
     ): android.app.Notification {
         ensureChannel()
 
@@ -408,6 +501,42 @@ class VeilVpnService : VpnService() {
             Intent(this, VeilVpnService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val pauseAction = PendingIntent.getService(
+            this, 2,
+            Intent(this, VeilVpnService::class.java).apply { action = ACTION_PAUSE },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val pauseLabel = if (paused) "Возобновить" else "Пауза"
+
+        // Android 16 (API 36): живой чип со шкалой стабильности через ProgressStyle.
+        if (Build.VERSION.SDK_INT >= 36) {
+            val green = Color.parseColor("#34A853")
+            val gray = Color.parseColor("#8E918F")
+            val style = Notification.ProgressStyle()
+                .setProgressSegments(listOf(Notification.ProgressStyle.Segment(100).setColor(green)))
+                .setProgressPoints(
+                    listOf(
+                        Notification.ProgressStyle.Point(25).setColor(gray),
+                        Notification.ProgressStyle.Point(50).setColor(gray),
+                        Notification.ProgressStyle.Point(75).setColor(gray),
+                    ),
+                )
+                .setProgress(if (paused) 0 else stability(seconds))
+                .setStyledByProgress(false)
+
+            val builder = Notification.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_vpn)
+                .setContentTitle("Veil · $text")
+                .setContentText(subtitle ?: "Туннель активен")
+                .setContentIntent(open)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setStyle(style)
+            builder.addAction(0, pauseLabel, pauseAction)
+            builder.addAction(0, "Отключить", stopAction)
+            return builder.build()
+        }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_vpn)
@@ -415,13 +544,17 @@ class VeilVpnService : VpnService() {
             .setContentText(subtitle ?: "Туннель активен")
             .setSubText(subtitle)
             .setContentIntent(open)
-            .setOngoing(ongoing)
+            .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .addAction(0, pauseLabel, pauseAction)
             .addAction(0, "Отключить", stopAction)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
+
+    /** «Стабильность»: первые 60 секунд шкала заполняется, дальше — полная. */
+    private fun stability(seconds: Long): Int = (seconds * 100 / 60).toInt().coerceIn(0, 100)
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

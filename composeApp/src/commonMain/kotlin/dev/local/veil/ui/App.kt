@@ -1,5 +1,20 @@
 package dev.local.veil.ui
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -15,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -86,6 +102,7 @@ fun App(container: AppContainer) {
         var showAdd by remember { mutableStateOf(false) }
         var showQr by remember { mutableStateOf(false) }
         var showLogs by remember { mutableStateOf(false) }
+        var showReceive by remember { mutableStateOf(false) }
 
         // Единый тикер на всё приложение: таймер в карточке не зависит от того,
         // пересоздалась ли карточка при прокрутке или возврате в приложение.
@@ -99,12 +116,13 @@ fun App(container: AppContainer) {
 
         // Жест «назад» сначала закрывает шторку/вложенный экран и возвращает
         // на «Серверы», и только потом выпускает из приложения.
-        PlatformBackHandler(enabled = showQr || showAdd || showLogs || showSplit || tab != Tab.SERVERS) {
+        PlatformBackHandler(enabled = showQr || showAdd || showLogs || showSplit || showReceive || tab != Tab.SERVERS) {
             when {
                 showQr -> showQr = false
                 showAdd -> showAdd = false
                 showLogs -> showLogs = false
                 showSplit -> showSplit = false
+                showReceive -> showReceive = false
                 else -> tab = Tab.SERVERS
             }
         }
@@ -128,6 +146,13 @@ fun App(container: AppContainer) {
             }
         }
 
+        // Буллетин мягко съезжает, когда нижняя навигация прячется.
+        val bulletinBottom by animateDpAsState(
+            targetValue = if (showSplit || showLogs || showReceive) 24.dp else 104.dp,
+            animationSpec = tween(180),
+            label = "bulletin-pad",
+        )
+
         Box(Modifier.fillMaxSize()) {
             Scaffold(
             modifier = Modifier
@@ -135,7 +160,16 @@ fun App(container: AppContainer) {
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                if (showLogs) {
+              // Панели сменяют друг друга коротким слайдом без отскока.
+              AnimatedContent(
+                targetState = if (showLogs) 100 else if (showSplit) 101 else if (showReceive) 102 else tab.ordinal,
+                transitionSpec = {
+                    (fadeIn(tween(180)) + slideInVertically(tween(200)) { -it / 4 }) togetherWith
+                        fadeOut(tween(140))
+                },
+                label = "topbar",
+              ) { bar ->
+                if (bar == 100) {
                     TopAppBar(
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.background,
@@ -147,7 +181,7 @@ fun App(container: AppContainer) {
                         },
                         title = { Text("Логи ядра", fontWeight = FontWeight.Black) },
                     )
-                } else if (showSplit) {
+                } else if (bar == 101) {
                     TopAppBar(
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.background,
@@ -159,27 +193,29 @@ fun App(container: AppContainer) {
                         },
                         title = { Text("Раздельный туннель", fontWeight = FontWeight.Black) },
                     )
-                } else if (tab == Tab.SERVERS) {
-                    LargeTopAppBar(
-                        colors = TopAppBarDefaults.largeTopAppBarColors(
+                } else if (bar == 102) {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.background,
-                            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        ),
+                        navigationIcon = {
+                            IconButton(onClick = { showReceive = false }) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Назад")
+                            }
+                        },
+                        title = { Text("Принять с другого устройства", fontWeight = FontWeight.Black) },
+                    )
+                } else if (bar == Tab.SERVERS.ordinal) {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
                         ),
                         scrollBehavior = scrollBehavior,
                         title = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                VeilMark(40.dp)
+                                VeilMark(34.dp)
                                 Spacer(Modifier.size(10.dp))
                                 Text("Veil", fontWeight = FontWeight.Black)
-                            }
-                        },
-                        actions = {
-                            CoreChip(state, status)
-                            IconButton(
-                                onClick = { state.refreshAll() },
-                                enabled = state.subscriptions.isNotEmpty() && !state.busy,
-                            ) {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "Обновить подписки")
                             }
                         },
                     )
@@ -193,7 +229,7 @@ fun App(container: AppContainer) {
                                 VeilMark(30.dp)
                                 Spacer(Modifier.size(10.dp))
                                 Text(
-                                    text = when (tab) {
+                                    text = when (Tab.entries[bar]) {
                                         Tab.SUBS -> "Подписки"
                                         else -> "Настройки"
                                     },
@@ -201,19 +237,30 @@ fun App(container: AppContainer) {
                                 )
                             }
                         },
-                        actions = { CoreChip(state, status) },
                     )
                 }
+              }
             },
             bottomBar = {
-                if (!showSplit && !showLogs) {
+                AnimatedVisibility(
+                    visible = !showSplit && !showLogs && !showReceive,
+                    enter = slideInVertically(tween(180)) { it } + fadeIn(),
+                    exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(150)),
+                ) {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                         Tab.entries.forEach { entry ->
                             NavigationBarItem(
                                 selected = tab == entry,
                                 onClick = { tab = entry },
                                 icon = {
+                                    // Выбранная иконка чуть крупнее — без подпрыгивания.
+                                    val pop by animateFloatAsState(
+                                        if (tab == entry) 1.1f else 1f,
+                                        tween(180),
+                                        label = "nav-pop",
+                                    )
                                     Icon(
+                                        modifier = Modifier.graphicsLayer { scaleX = pop; scaleY = pop },
                                         imageVector = when (entry) {
                                             Tab.SERVERS -> Icons.Rounded.ViewList
                                             Tab.SUBS -> Icons.Rounded.CloudSync
@@ -229,8 +276,23 @@ fun App(container: AppContainer) {
                 }
             },
             floatingActionButton = {
-                if (!showSplit && (tab == Tab.SERVERS || tab == Tab.SUBS)) {
-                    FloatingActionButton(onClick = { showAdd = true }) {
+                AnimatedVisibility(
+                    visible = !showSplit && !showReceive && (tab == Tab.SERVERS || tab == Tab.SUBS),
+                    enter = scaleIn(tween(180)) + fadeIn(),
+                    exit = scaleOut() + fadeOut(),
+                ) {
+                    // Кнопка морфится в цветок при нажатии.
+                    val fabSource = remember { MutableInteractionSource() }
+                    val fabPressed by fabSource.collectIsPressedAsState()
+                    val fabShape = rememberMorphShape(
+                        active = fabPressed,
+                        to = MaterialShapePresets.Flower,
+                    )
+                    FloatingActionButton(
+                        onClick = { showAdd = true },
+                        shape = fabShape,
+                        interactionSource = fabSource,
+                    ) {
                         Icon(Icons.Rounded.Add, contentDescription = "Добавить")
                     }
                 }
@@ -238,31 +300,46 @@ fun App(container: AppContainer) {
         ) { insets ->
             val modifier = Modifier.padding(insets)
 
-            if (showLogs) {
+            // Логи и раздельный туннель выезжают справа, основной экран отъезжает назад.
+            AnimatedContent(
+                targetState = if (showLogs) 2 else if (showSplit) 1 else if (showReceive) 3 else 0,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        (slideInHorizontally(tween(180)) { it } + fadeIn(tween(180))) togetherWith
+                            (slideOutHorizontally(tween(180)) { -it / 4 } + fadeOut(tween(180)) + scaleOut(targetScale = 0.94f))
+                    } else {
+                        (slideInHorizontally(tween(180)) { -it / 4 } + fadeIn(tween(180)) + scaleIn(initialScale = 0.94f)) togetherWith
+                            (slideOutHorizontally(tween(180)) { it } + fadeOut(tween(180)))
+                    }
+                },
+                label = "overlay",
+            ) { overlay ->
+            if (overlay == 2) {
                 LogsScreen(
                     provider = container.logs,
                     modifier = modifier.fillMaxSize(),
                     onBack = { showLogs = false },
                     onBulletin = { state.showBulletin(it) },
                 )
-            } else if (showSplit) {
+            } else if (overlay == 1) {
                 SplitTunnelScreen(state = state, modifier = modifier.fillMaxSize())
+            } else if (overlay == 3) {
+                ReceiveScreen(state = state, modifier = modifier.fillMaxSize())
             } else {
                 AnimatedContent(
                     targetState = tab,
                     transitionSpec = {
-                        // Соседние вкладки едут в сторону движения: влево/вправо
-                        // с лёгким пружинным перелётом, как в M3 Expressive.
+                        // Соседние вкладки: короткий слайд без отскока.
                         val forward = targetState.ordinal > initialState.ordinal
                         val shift = { full: Int -> if (forward) full / 7 else -full / 7 }
                         (slideInHorizontally(
-                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+                            animationSpec = tween(220),
                             initialOffsetX = shift,
                         ) + fadeIn(tween(220))) togetherWith
                             (slideOutHorizontally(
-                                animationSpec = tween(170),
+                                animationSpec = tween(180),
                                 targetOffsetX = { full -> -shift(full) },
-                            ) + fadeOut(tween(140)))
+                            ) + fadeOut(tween(180)))
                     },
                     label = "tab",
                 ) { current ->
@@ -273,6 +350,7 @@ fun App(container: AppContainer) {
                             onOpenSubscriptions = { tab = Tab.SUBS },
                             modifier = modifier,
                             now = now,
+                            onOpenReceive = { showReceive = true },
                         )
                         Tab.SUBS -> SubscriptionsScreen(state = state, modifier = modifier.fillMaxSize())
                         Tab.SETTINGS -> SettingsScreen(
@@ -281,10 +359,12 @@ fun App(container: AppContainer) {
                             onOpenSplit = { showSplit = true },
                             onOpenSubscriptions = { tab = Tab.SUBS },
                             onOpenLogs = { showLogs = true },
+                            onOpenReceive = { showReceive = true },
                             modifier = modifier,
                         )
                     }
                 }
+            }
             }
         }
 
@@ -293,7 +373,25 @@ fun App(container: AppContainer) {
                 onDismiss = state::dismissBulletin,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 16.dp, end = 16.dp, bottom = if (showSplit || showLogs) 24.dp else 104.dp),
+                    .padding(start = 16.dp, end = 16.dp, bottom = bulletinBottom),
+            )
+        }
+
+        // QR приставки в локальной сети: спрашиваем, прежде чем отправлять ключи.
+        if (state.pendingPairing != null) {
+            AlertDialog(
+                onDismissRequest = state::dismissTransfer,
+                shape = RoundedCornerShape(32.dp),
+                icon = { Icon(Icons.Rounded.QrCode2, contentDescription = null) },
+                title = { Text("Отправить на приставку?", fontWeight = FontWeight.Black) },
+                text = {
+                    Text(
+                        "Подписок: ${state.subscriptions.size}, серверов вручную: ${state.servers.count { it.source == null }}. " +
+                            "Они уйдут на устройство в вашей локальной сети.",
+                    )
+                },
+                confirmButton = { TextButton(onClick = state::confirmTransfer) { Text("Отправить") } },
+                dismissButton = { TextButton(onClick = state::dismissTransfer) { Text("Отмена") } },
             )
         }
 
@@ -320,10 +418,15 @@ fun App(container: AppContainer) {
                         showAdd = false
                     },
                     onCancel = { showAdd = false },
-                    onScan = if (qrSupported) {
+                    // На приставке камеры нет — там вместо сканера приём по QR.
+                    onScan = if (qrSupported && !state.isTv) {
                         { showQr = true }
                     } else {
                         null
+                    },
+                    onReceive = {
+                        showAdd = false
+                        showReceive = true
                     },
                 )
             }
@@ -337,6 +440,7 @@ private fun AddSheet(
     onAdd: (String) -> Unit,
     onCancel: () -> Unit,
     onScan: (() -> Unit)? = null,
+    onReceive: (() -> Unit)? = null,
 ) {
     var text by remember { mutableStateOf("") }
 
@@ -373,6 +477,18 @@ private fun AddSheet(
             }
         }
 
+        if (onReceive != null) {
+            OutlinedButton(
+                onClick = onReceive,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("Принять с другого устройства")
+            }
+        }
+
         Text(
             text = "Ссылка, base64 или конфиг Xray.",
             style = MaterialTheme.typography.bodySmall,
@@ -399,19 +515,3 @@ private fun RowButtons(
     }
 }
 
-@Composable
-private fun CoreChip(state: VeilState, status: dev.local.veil.platform.VpnStatus) {
-    val version = (status.coreVersion ?: state.coreVersion)
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-    ) {
-        Text(
-            text = version?.let { "Xray $it" } ?: "ядро нет",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-        )
-    }
-}

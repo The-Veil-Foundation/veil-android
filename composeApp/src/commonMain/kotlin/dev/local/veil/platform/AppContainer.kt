@@ -6,7 +6,7 @@ import dev.local.veil.core.Subscription
 import dev.local.veil.core.TunnelOptions
 import kotlinx.coroutines.flow.StateFlow
 
-enum class VpnPhase { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
+enum class VpnPhase { DISCONNECTED, CONNECTING, CONNECTED, PAUSED, ERROR }
 
 data class VpnStatus(
     val phase: VpnPhase = VpnPhase.DISCONNECTED,
@@ -21,6 +21,7 @@ data class VpnStatus(
     val connectedSince: Long = 0,
 ) {
     val isConnected: Boolean get() = phase == VpnPhase.CONNECTED
+    val isPaused: Boolean get() = phase == VpnPhase.PAUSED
     val isBusy: Boolean get() = phase == VpnPhase.CONNECTING
 }
 
@@ -37,8 +38,16 @@ interface VpnController {
      */
     suspend fun probe(server: ProxyConfig, options: TunnelOptions): Boolean
 
+    /**
+     * Реальная задержка: запрос через ядро и сервер, по уже открытому
+     * соединению — то есть чистый RTT пути «телефон → сервер → интернет».
+     * null — узел не отвечает или ядра нет.
+     */
+    suspend fun realPing(server: ProxyConfig, options: TunnelOptions, timeoutMs: Int = 4000): Int? = null
+
     suspend fun connect(server: ProxyConfig, options: TunnelOptions): Result<Unit>
     suspend fun disconnect()
+    suspend fun resume() {}
     suspend fun reconnect(server: ProxyConfig, options: TunnelOptions): Result<Unit>
     fun clearError()
 }
@@ -125,4 +134,7 @@ interface AppContainer {
     val subscriptions: SubscriptionFetcher
     val packages: PackageLister
     val pinger: Pinger
+
+    /** Перенос на другие устройства и «Поделиться»; по умолчанию недоступен. */
+    val transfer: TransferService get() = NoTransferService
 }

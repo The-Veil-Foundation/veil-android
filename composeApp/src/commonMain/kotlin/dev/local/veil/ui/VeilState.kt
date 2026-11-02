@@ -1,5 +1,11 @@
 package dev.local.veil.ui
 
+import dev.local.veil.core.Pairing
+import dev.local.veil.core.ShareLink
+import dev.local.veil.core.TransferPayload
+import dev.local.veil.platform.ReceiveSession
+import dev.local.veil.platform.PingMode
+import kotlinx.coroutines.Job
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -28,16 +34,36 @@ class VeilState(
     private val container: AppContainer,
     private val scope: CoroutineScope,
 ) {
+    // Ленивая загрузка для ускорения старта: серверы/подписки грузим в фоне.
     var settings by mutableStateOf(container.settings.load())
         private set
-    var servers by mutableStateOf(container.store.load())
+    var servers by mutableStateOf<List<ProxyConfig>>(emptyList())
         private set
-    var subscriptions by mutableStateOf(container.store.loadSubscriptions())
+    var subscriptions by mutableStateOf<List<Subscription>>(emptyList())
         private set
-    var selectedId by mutableStateOf(container.store.loadSelectedId() ?: container.store.load().firstOrNull()?.id)
+    var selectedId by mutableStateOf<String?>(null)
         private set
+    
+    init {
+        scope.launch(Dispatchers.IO) {
+            val s = container.store.load()
+            val subs = container.store.loadSubscriptions()
+            val sel = container.store.loadSelectedId() ?: s.firstOrNull()?.id
+            withContext(Dispatchers.Main) {
+                servers = s
+                subscriptions = subs
+                selectedId = sel
+            }
+        }
+    }
     var pings by mutableStateOf<Map<String, Int?>>(emptyMap())
         private set
+    var pingMode by mutableStateOf(PingMode.REAL)
+        private set
+    /** Сколько серверов уже измерено из скольких — для индикатора. */
+    var pingProgress by mutableStateOf(0 to 0)
+        private set
+    private var pingJob: Job? = null
     var pinging by mutableStateOf(false)
         private set
     var busy by mutableStateOf(false)
@@ -145,24 +171,66 @@ class VeilState(
 
     /* ---------------- пинг ---------------- */
 
-    fun pingAll() {
-        if (pinging || servers.isEmpty()) return
+    fun choosePingMode(mode: PingMode) {
+        if (pinging || mode == pingMode) return
+        pingMode = mode
+        pings = emptyMap() // цифры разных методов нельзя смешивать
+    }
+
+    fun cancelPing() {
+        pingJob?.cancel()
+    }
+
+    fun pingAll() = pingTargets(servers)
+
+    /** Пинг одной подписки (или группы «Вручную», если [source] == null). */
+    fun pingSource(source: String?) = pingTargets(servers.filter { it.source == source })
+
+    fun pingOne(server: ProxyConfig) = pingTargets(listOf(server))
+
+    private fun pingTargets(targets: List<ProxyConfig>) {
+        if (pinging || targets.isEmpty()) return
+        val mode = pingMode
+        if (mode == PingMode.REAL && !container.vpn.coreAvailable) {
+            showBulletin("Реальный пинг требует ядро Xray — выберите TCP или ICMP", BulletinKind.ERROR)
+            return
+        }
         pinging = true
-        pings = emptyMap()
+        // Старые цифры других групп остаются: замер идёт только по выбранным.
+        val ids = targets.map { it.id }.toSet()
+        pings = pings.filterKeys { it !in ids }
+        pingProgress = 0 to targets.size
+        val options = settings.toTunnelOptions()
 
-        scope.launch {
-            val semaphore = Semaphore(8)
-            val results = servers.map { server ->
-                async(Dispatchers.IO) {
-                    val value = semaphore.withPermit {
-                        container.pinger.ping(server, timeoutMs = 1500)
+        pingJob = scope.launch {
+            try {
+                when (mode) {
+                    PingMode.TCP, PingMode.ICMP -> {
+                        val semaphore = Semaphore(8)
+                        val results = targets.map { server ->
+                            async(Dispatchers.IO) {
+                                semaphore.withPermit {
+                                    if (mode == PingMode.TCP) container.pinger.ping(server, timeoutMs = 1500)
+                                    else container.pinger.icmp(server, timeoutMs = 2000)
+                                }
+                            }
+                        }.awaitAll()
+                        pings = pings + targets.mapIndexed { index, server -> server.id to results[index] }.toMap()
+                        pingProgress = targets.size to targets.size
                     }
-                    value
+                    PingMode.REAL -> {
+                        // Ядро для замера одно, поэтому по очереди; результаты
+                        // появляются сразу, а не в конце.
+                        targets.forEachIndexed { index, server ->
+                            val value = container.vpn.realPing(server, options, timeoutMs = 3500)
+                            pings = pings + (server.id to value)
+                            pingProgress = (index + 1) to targets.size
+                        }
+                    }
                 }
-            }.awaitAll()
-
-            pings = servers.mapIndexed { index, server -> server.id to results[index] }.toMap()
-            pinging = false
+            } finally {
+                pinging = false
+            }
         }
     }
 
@@ -181,6 +249,52 @@ class VeilState(
         saveSettings(settings.copy(splitMode = mode))
     }
 
+    private val iconCache = HashMap<String, androidx.compose.ui.graphics.ImageBitmap?>()
+
+    fun cachedIcon(packageName: String) = iconCache[packageName]
+
+    suspend fun appIcon(packageName: String): androidx.compose.ui.graphics.ImageBitmap? {
+        if (iconCache.containsKey(packageName)) return iconCache[packageName]
+        val icon = runCatching { container.packages.icon(packageName) }.getOrNull()
+        iconCache[packageName] = icon
+        return icon
+    }
+
+    fun clearSplitPackages() {
+        saveSettings(settings.copy(splitPackages = emptySet()))
+    }
+
+    private var splitSnapshot: Pair<SplitMode, Set<String>>? = null
+
+    /** Экран выбора открыт: запоминаем исходное состояние, чтобы понять, менялось ли оно. */
+    fun beginSplitEdit() {
+        splitSnapshot = settings.splitMode to settings.splitPackages
+    }
+
+    /**
+     * Экран закрыт. TUN создаётся один раз при подключении, поэтому изменения
+     * применяются только пересозданием интерфейса: раньше их приходилось
+     * подтверждать ручным переподключением.
+     */
+    fun finishSplitEdit() {
+        val before = splitSnapshot ?: return
+        splitSnapshot = null
+        if (before == (settings.splitMode to settings.splitPackages)) return
+        if (!container.vpn.status.value.isConnected) return
+        val server = selected ?: return
+        if (settings.splitMode == SplitMode.INCLUDE && settings.splitPackages.isEmpty()) {
+            showBulletin("Режим «Только»: выберите хотя бы одно приложение", BulletinKind.ERROR)
+            return
+        }
+        if (switchJob?.isActive == true) return
+        showBulletin("Применяем раздельный туннель…", BulletinKind.INFO)
+        switchJob = scope.launch {
+            container.vpn.reconnect(server, settings.toTunnelOptions()).onFailure {
+                showBulletin(it.message ?: "Не удалось применить раздельный туннель", BulletinKind.ERROR)
+            }
+        }
+    }
+
     fun toggleSplitPackage(packageName: String) {
         val next = if (packageName in settings.splitPackages) {
             settings.splitPackages - packageName
@@ -197,6 +311,11 @@ class VeilState(
      */
     fun addInput(input: String) {
         val text = input.trim()
+        // QR приставки: не подписка, а предложение отправить подписки на неё.
+        Pairing.parse(text)?.let {
+            pendingPairing = it
+            return
+        }
         if (text.startsWith("http://") || text.startsWith("https://")) {
             addSubscription(text)
             return
@@ -208,14 +327,90 @@ class VeilState(
         scope.launch {
             busy = true
             bulletin = null
-            container.subscriptions.fetch(url)
-                .onSuccess { fetched ->
-                    applyBody(SubscriptionPayload.classify(fetched.body), source = url, usage = fetched.usage)
-                }
-                .onFailure { showBulletin(it.message ?: "Не удалось скачать подписку", BulletinKind.ERROR) }
+            fetchAndAdd(url)
             busy = false
         }
     }
+
+    private suspend fun fetchAndAdd(url: String) {
+        container.subscriptions.fetch(url)
+            .onSuccess { fetched ->
+                applyBody(SubscriptionPayload.classify(fetched.body), source = url, usage = fetched.usage)
+            }
+            .onFailure { showBulletin(it.message ?: "Не удалось скачать подписку", BulletinKind.ERROR) }
+    }
+
+    /* ---------------- перенос между устройствами ---------------- */
+
+    /** Телевизор или приставка: камеры нет, подписки приходят с телефона. */
+    val isTv: Boolean = container.transfer.isTelevision
+
+    /** Адрес приёма из отсканированного QR — ждёт подтверждения пользователя. */
+    var pendingPairing by mutableStateOf<String?>(null)
+        private set
+
+    fun dismissTransfer() {
+        pendingPairing = null
+    }
+
+    /** Открывает приём на этом устройстве; вызывающий обязан закрыть сессию. */
+    fun startReceiving(): ReceiveSession? = container.transfer.startReceiving { receiveTransfer(it) }
+
+    /** Пришло с другого устройства: подписки скачиваются, серверы добавляются. */
+    fun receiveTransfer(payload: TransferPayload) {
+        scope.launch {
+            busy = true
+            bulletin = null
+            val before = servers.size
+            payload.subscriptions
+                .filter { it.startsWith("http://") || it.startsWith("https://") }
+                .forEach { fetchAndAdd(it) }
+            if (payload.servers.isNotEmpty()) {
+                applyBody(
+                    SubscriptionPayload.classify(payload.servers.joinToString("\n")),
+                    source = null,
+                    usage = null,
+                )
+            }
+            busy = false
+            showBulletin(
+                "Получено: подписок ${payload.subscriptions.size}, новых серверов ${servers.size - before}",
+                BulletinKind.SUCCESS,
+            )
+        }
+    }
+
+    /** Отправляет всё, что есть на этом устройстве, на приставку из QR. */
+    fun confirmTransfer() {
+        val address = pendingPairing ?: return
+        pendingPairing = null
+        val payload = TransferPayload(
+            subscriptions = subscriptions.map { it.url },
+            servers = servers.filter { it.source == null }.mapNotNull { ShareLink.encode(it) },
+        )
+        if (payload.isEmpty) {
+            showBulletin("Нечего отправлять: добавьте подписку или сервер", BulletinKind.ERROR)
+            return
+        }
+        scope.launch {
+            busy = true
+            container.transfer.send(address, payload)
+                .onSuccess {
+                    showBulletin(
+                        "Отправлено: подписок ${payload.subscriptions.size}, серверов ${payload.servers.size}",
+                        BulletinKind.SUCCESS,
+                    )
+                }
+                .onFailure { showBulletin(it.message ?: "Не удалось отправить", BulletinKind.ERROR) }
+            busy = false
+        }
+    }
+
+    /* ---------------- ссылки и «Поделиться» ---------------- */
+
+    fun linkFor(server: ProxyConfig): String? = ShareLink.encode(server)
+
+    fun share(text: String) = container.transfer.shareText(text)
 
     fun refreshSubscription(subscription: Subscription) {
         scope.launch {
@@ -345,6 +540,7 @@ class VeilState(
     fun toggleTunnel(status: VpnStatus) {
         when (status.phase) {
             VpnPhase.CONNECTED -> scope.launch { container.vpn.disconnect() }
+            VpnPhase.PAUSED -> scope.launch { container.vpn.resume() }
             VpnPhase.CONNECTING -> Unit
             VpnPhase.DISCONNECTED, VpnPhase.ERROR -> connect()
         }
@@ -363,6 +559,10 @@ class VeilState(
         }
         if (!coreAvailable) {
             showBulletin("xray.aar не подключён к сборке", BulletinKind.ERROR)
+            return
+        }
+        if (settings.splitMode == SplitMode.INCLUDE && settings.splitPackages.isEmpty()) {
+            showBulletin("Режим «Только»: выберите приложения в разделе «Раздельный туннель»", BulletinKind.ERROR)
             return
         }
         bulletin = null
@@ -435,17 +635,35 @@ class VeilState(
         scope.launch {
             checking = true
             checkingServer = server
-            val rtt = try {
-                withContext(Dispatchers.IO) { container.pinger.ping(server, timeoutMs = 4000) }
+            val tcp: Int?
+            val real: Int?
+            try {
+                tcp = withContext(Dispatchers.IO) { container.pinger.ping(server, timeoutMs = 4000) }
+                real = if (container.vpn.coreAvailable) {
+                    container.vpn.realPing(server, settings.toTunnelOptions(), timeoutMs = 6000)
+                } else {
+                    null
+                }
             } finally {
                 checking = false
                 checkingServer = null
             }
-            if (rtt == null) {
-                showBulletin("«${server.name}» не отвечает", BulletinKind.ERROR)
-            } else {
-                pings = pings + (server.id to rtt)
-                showBulletin("«${server.name}» отвечает · $rtt мс", BulletinKind.SUCCESS)
+            when {
+                real != null -> {
+                    if (pingMode == PingMode.REAL) pings = pings + (server.id to real)
+                    val tcpPart = tcp?.let { " · TCP $it мс" }.orEmpty()
+                    showBulletin("«${server.name}» отвечает · реальный $real мс$tcpPart", BulletinKind.SUCCESS)
+                }
+                tcp != null -> {
+                    if (pingMode == PingMode.TCP) pings = pings + (server.id to tcp)
+                    val note = if (container.vpn.coreAvailable) {
+                        "порт открыт ($tcp мс), но через узел трафик не идёт"
+                    } else {
+                        "порт открыт · TCP $tcp мс"
+                    }
+                    showBulletin("«${server.name}»: $note", if (container.vpn.coreAvailable) BulletinKind.ERROR else BulletinKind.SUCCESS)
+                }
+                else -> showBulletin("«${server.name}» не отвечает", BulletinKind.ERROR)
             }
         }
     }

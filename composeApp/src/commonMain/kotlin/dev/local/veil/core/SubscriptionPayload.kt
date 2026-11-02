@@ -165,7 +165,19 @@ object SubscriptionPayload {
             publicKey = reality?.get("publicKey")?.jsonPrimitive?.contentOrNull,
             shortId = reality?.get("shortId")?.jsonPrimitive?.contentOrNull,
             rawConfigJson = Json.encodeToString(JsonObject.serializer(), config),
+            balanced = balancedCount(config, outbounds),
         )
+    }
+
+    /** Конфиг с балансировщиком гоняет трафик по нескольким выходам: считаем прокси среди них. */
+    private fun balancedCount(config: JsonObject, outbounds: List<JsonObject>): Int {
+        val balancers = (config["routing"] as? JsonObject)?.get("balancers") as? JsonArray
+        if (balancers.isNullOrEmpty()) return 0
+        val proxies = outbounds.count {
+            val p = it["protocol"]?.jsonPrimitive?.contentOrNull
+            p != null && p !in setOf("freedom", "blackhole", "dns")
+        }
+        return if (proxies > 1) proxies else 0
     }
 
     private fun endpoint(settings: JsonObject?): Pair<String, Int>? {

@@ -91,9 +91,12 @@ actual fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                 .background(Color.Black),
         ) {
             if (granted) {
+                var controller by remember { mutableStateOf<QrCameraController?>(null) }
                 AndroidView(
                     factory = { ctx ->
-                        TextureView(ctx).also { view -> QrCameraController(ctx, view, onResult) }
+                        TextureView(ctx).also { view ->
+                            controller = QrCameraController(ctx, view, onResult)
+                        }
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -174,21 +177,24 @@ private class QrCameraController(
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var images: ImageReader? = null
+    private var cameraSize: Size? = null
     @Volatile private var found = false
 
     init {
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                openCamera(surface)
+                openCamera(surface, width, height)
             }
 
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                cameraSize?.let { configureTransform(width, height, it) }
+            }
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
         }
     }
 
-    private fun openCamera(surfaceTexture: SurfaceTexture) {
+    private fun openCamera(surfaceTexture: SurfaceTexture, viewWidth: Int, viewHeight: Int) {
         val id = runCatching {
             manager.cameraIdList.firstOrNull { candidate ->
                 manager.getCameraCharacteristics(candidate).get(CameraCharacteristics.LENS_FACING) ==
@@ -205,6 +211,12 @@ private class QrCameraController(
             ?.filter { it.width <= 1600 }
             ?.minByOrNull { it.width * it.height }
             ?: Size(640, 480)
+
+        cameraSize = size
+        surfaceTexture.setDefaultBufferSize(size.width, size.height)
+        if (viewWidth > 0 && viewHeight > 0) {
+            configureTransform(viewWidth, viewHeight, size)
+        }
 
         val imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 3)
         images = imageReader
@@ -247,6 +259,32 @@ private class QrCameraController(
                     device = null
                 }
             }, handler)
+        }
+    }
+
+    private fun configureTransform(viewWidth: Int, viewHeight: Int, cameraSize: Size) {
+        val rotation = (context as? android.app.Activity)?.windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+        val matrix = android.graphics.Matrix()
+        val viewRect = android.graphics.RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+        val bufferRect = android.graphics.RectF(0f, 0f, cameraSize.height.toFloat(), cameraSize.width.toFloat())
+        val centerX = viewRect.centerX()
+        val centerY = viewRect.centerY()
+
+        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+            matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL)
+            val scale = maxOf(
+                viewHeight.toFloat() / cameraSize.height,
+                viewWidth.toFloat() / cameraSize.width,
+            )
+            matrix.postScale(scale, scale, centerX, centerY)
+            matrix.postRotate((90 * (rotation - 2)).toFloat(), centerX, centerY)
+        } else if (rotation == Surface.ROTATION_180) {
+            matrix.postRotate(180f, centerX, centerY)
+        }
+        
+        Handler(Looper.getMainLooper()).post {
+            textureView.setTransform(matrix)
         }
     }
 

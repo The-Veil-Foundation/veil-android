@@ -1,5 +1,23 @@
 package dev.local.veil.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material3.Button
+import dev.local.veil.platform.PingMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.draw.rotate
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -32,6 +50,8 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -74,9 +94,14 @@ fun ServersScreen(
     onOpenSubscriptions: () -> Unit,
     modifier: Modifier = Modifier,
     now: Long = 0L,
+    onOpenReceive: () -> Unit = {},
 ) {
     var onlyFast by remember { mutableStateOf(false) }
     var collapsed by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val seen = remember { mutableSetOf<Any>() }
+    // Действия над сервером и подпиской живут в нижних листах по долгому нажатию.
+    var sheetServer by remember { mutableStateOf<ProxyConfig?>(null) }
+    var sheetGroup by remember { mutableStateOf<Group?>(null) }
 
     val groups = remember(state.servers, state.subscriptions, onlyFast, state.pings) {
         val visible = if (onlyFast) {
@@ -114,7 +139,7 @@ fun ServersScreen(
             targetState = compact,
             transitionSpec = {
                 (fadeIn(tween(180)) + scaleIn(initialScale = 0.97f)) togetherWith
-                    (fadeOut(tween(120)) + scaleOut(targetScale = 0.99f))
+                    (fadeOut(tween(180)) + scaleOut(targetScale = 0.99f))
             },
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             label = "status-morph",
@@ -146,6 +171,9 @@ fun ServersScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+        if (state.update != null) {
+            item(key = "update") { UpdateAvailableRow(state = state) }
+        }
         item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -163,10 +191,13 @@ fun ServersScreen(
                     label = { Text("Быстрые") },
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = state::pingAll, enabled = !state.pinging && state.servers.isNotEmpty()) {
+                TextButton(
+                    onClick = if (state.pinging) state::cancelPing else state::pingAll,
+                    enabled = state.servers.isNotEmpty(),
+                ) {
                     Icon(Icons.Rounded.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(4.dp))
-                    Text(if (state.pinging) "Пинг…" else "Пинг")
+                    Text(if (state.pinging) "Стоп" else "Пинг")
                 }
             }
         }
@@ -181,38 +212,52 @@ fun ServersScreen(
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 40.dp, start = 24.dp, end = 24.dp),
+                    modifier = Modifier.staggerIn(seen, "empty", 0).padding(top = 40.dp, start = 24.dp, end = 24.dp),
                 )
+            }
+            // На приставке камеры нет: подписки приезжают с телефона по QR.
+            if (state.servers.isEmpty() && state.isTv) {
+                item(key = "receive-cta") {
+                    Button(
+                        onClick = onOpenReceive,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier
+                            .staggerIn(seen, "cta", 1)
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                    ) {
+                        Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("Принять с телефона по QR", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         } else {
             groups.forEach { group ->
                 item(key = "header-${group.key}") {
                     GroupHeader(
+                        modifier = Modifier.animateItem(),
                         group = group,
                         expanded = group.key !in collapsed,
-                        busy = state.busy,
+                        pinging = state.pinging,
                         onToggle = {
                             collapsed = if (group.key in collapsed) collapsed - group.key else collapsed + group.key
                         },
-                        onRefresh = {
-                            group.source?.let { url ->
-                                state.subscriptions.firstOrNull { it.url == url }?.let(state::refreshSubscription)
-                            }
-                        },
-                        onOpenSubscriptions = onOpenSubscriptions,
+                        onPing = { state.pingSource(group.source) },
+                        onMore = { sheetGroup = group },
                     )
                 }
 
                 if (group.key !in collapsed) {
-                    items(group.servers, key = { it.id }) { server ->
+                    itemsIndexed(group.servers, key = { _, it -> it.id }) { i, server ->
                         ServerRow(
+                            modifier = Modifier.animateItem(),
                             server = server,
                             selected = server.id == state.selected?.id,
                             ping = state.pings[server.id],
                             measured = server.id in state.pings,
                             pinging = state.pinging,
                             onClick = { state.select(server.id, status) },
-                            onDelete = { state.removeServer(server.id) },
+                            onLongClick = { sheetServer = server },
                         )
                     }
                 }
@@ -220,34 +265,63 @@ fun ServersScreen(
         }
         }
     }
+
+    sheetServer?.let { server ->
+        ServerActionsSheet(
+            state = state,
+            status = status,
+            server = server,
+            onDismiss = { sheetServer = null },
+        )
+    }
+    sheetGroup?.let { group ->
+        SubscriptionActionsSheet(
+            state = state,
+            title = group.title,
+            source = group.source,
+            servers = group.servers,
+            collapsed = group.key in collapsed,
+            onToggleCollapse = {
+                collapsed = if (group.key in collapsed) collapsed - group.key else collapsed + group.key
+            },
+            onDismiss = { sheetGroup = null },
+        )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun GroupHeader(
     group: Group,
     expanded: Boolean,
-    busy: Boolean,
+    pinging: Boolean,
     onToggle: () -> Unit,
-    onRefresh: () -> Unit,
-    onOpenSubscriptions: () -> Unit,
+    onPing: () -> Unit,
+    onMore: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val headerShape = MaterialTheme.shapes.medium
+    // Шеврон не подменяется, а поворачивается с пружиной.
+    val chevron by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(180),
+        label = "chevron",
+    )
     Surface(
         shape = headerShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             Modifier
-                .clickable(onClick = onToggle)
+                .combinedClickable(onClick = onToggle, onLongClick = onMore)
                 .padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                imageVector = Icons.Rounded.ExpandMore,
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(20.dp).rotate(chevron),
             )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
@@ -264,15 +338,17 @@ private fun GroupHeader(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (group.source != null) {
-                IconButton(onClick = onRefresh, enabled = !busy) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Обновить подписку", modifier = Modifier.size(18.dp))
-                }
+            IconButton(onClick = onPing, enabled = !pinging) {
+                Icon(Icons.Rounded.Speed, contentDescription = "Пинг группы", modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onMore) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = "Действия", modifier = Modifier.size(20.dp))
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ServerRow(
     server: ProxyConfig,
@@ -281,7 +357,8 @@ private fun ServerRow(
     measured: Boolean,
     pinging: Boolean,
     onClick: () -> Unit,
-    onDelete: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // Экспрессивное нажатие: строка «проседает» под пальцем и пружинно
     // возвращается — как в Material 3 Expressive.
@@ -289,28 +366,52 @@ private fun ServerRow(
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.965f else 1f,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = 720f),
+        animationSpec = tween(180),
         label = "row-press",
     )
 
-    val rowShape = if (selected) MaterialTheme.shapes.large else MaterialTheme.shapes.medium
-    Surface(
-        onClick = onClick,
-        interactionSource = interaction,
-        shape = rowShape,
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer
+    // Выбранная строка округляется и перекрашивается с пружинным отскоком.
+    val corner by animateDpAsState(
+        targetValue = if (selected) 32.dp else 24.dp,
+        animationSpec = tween(180),
+        label = "row-corner",
+    )
+    val rowColor by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.secondaryContainer
         else MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+        label = "row-bg",
+    )
+    val rowContent by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.onSecondaryContainer
         else MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier
+        label = "row-fg",
+    )
+    val haptics = LocalHapticFeedback.current
+    val rowShape = RoundedCornerShape(corner)
+    Surface(
+        shape = rowShape,
+        color = rowColor,
+        contentColor = rowContent,
+        modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-            },
+            }
+            .clip(rowShape)
+            // Короткое нажатие выбирает сервер, долгое открывает лист действий.
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                onClick = onClick,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            ),
     ) {
         Row(
-            Modifier.padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+            Modifier.padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -323,7 +424,11 @@ private fun ServerRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "${server.proto.wire.uppercase()} · ${server.endpoint}",
+                    text = if (server.balanced > 1) {
+                        "${server.proto.wire.uppercase()} · авто из ${server.balanced} транспортов"
+                    } else {
+                        "${server.proto.wire.uppercase()} · ${server.endpoint}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -331,8 +436,45 @@ private fun ServerRow(
                 )
             }
             PingPill(ms = ping, measured = measured, pinging = pinging)
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Rounded.Delete, contentDescription = "Удалить", modifier = Modifier.size(17.dp))
+        }
+    }
+}
+
+/** Небольшая плашка на главной: «доступно обновление». */
+@Composable
+private fun UpdateAvailableRow(state: VeilState) {
+    val release = state.update ?: return
+    val progress = state.updateProgress
+    Surface(
+        onClick = { if (progress == null) state.downloadUpdate() },
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.SystemUpdate,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.size(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Доступно обновление ${release.version}",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    if (progress != null) "Загрузка… ${(progress * 100).toInt()}%" else "Нажмите, чтобы скачать",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            IconButton(onClick = { state.dismissUpdate() }) {
+                Icon(Icons.Rounded.Close, contentDescription = "Скрыть", modifier = Modifier.size(18.dp))
             }
         }
     }

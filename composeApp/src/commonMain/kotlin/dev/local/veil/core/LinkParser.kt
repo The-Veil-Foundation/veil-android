@@ -31,6 +31,8 @@ object LinkParser {
             "tuic" -> parseTuic(line)
             "anytls" -> parseAnyTls(line)
             "wireguard", "wg" -> parseWireGuard(line)
+            "happ" -> parseHapp(line)
+            "incy" -> parseIncy(line)
             else -> throw LinkParseException("Unsupported link scheme: $scheme")
         }
     }
@@ -388,5 +390,112 @@ object LinkParser {
         if (percentEncoded.isNullOrEmpty()) return null
         val decoded = percentDecode(percentEncoded)
         return decoded.ifEmpty { null }
+    }
+
+    /* ---------------- happ:// (HappyVPN format) ---------------- */
+
+    /**
+     * happ:// формат: base64-encoded JSON, похожий на vmess://
+     * Пример: happ://eyJ2IjoyLCJwcyI6Im5vZGUxIiwiYWRkIjoiMS4yLjMuNCIsInBvcnQiOjQ0MywidHlwZSI6InZsZXNzIiwiaWQiOiJ1dWlkLWhlcmUiLCJuZXQiOiJ3cyIsInBhdGgiOiIvcGF0aCIsInRscyI6InRscyIsInNuaSI6ImV4YW1wbGUuY29tIn0=
+     */
+    private fun parseHapp(line: String): ProxyConfig {
+        val b64 = line.removePrefix("happ://")
+        val json: JsonObject = runCatching {
+            Json.parseToJsonElement(base64Decode(b64)) as JsonObject
+        }.getOrNull() ?: throw LinkParseException("Malformed happ link")
+
+        fun str(key: String): String? = json[key]?.jsonPrimitive?.contentOrNull
+
+        val type = (str("type") ?: str("protocol") ?: "vless").lowercase()
+        val host = str("add") ?: str("address") ?: str("server") ?: throw LinkParseException("Missing server in happ link")
+        val port = str("port")?.toIntOrNull() ?: 443
+        val id = str("id") ?: str("uuid") ?: throw LinkParseException("Missing ID in happ link")
+
+        val tls = (str("tls") ?: str("security") ?: "").lowercase()
+        val security = when {
+            tls.contains("reality") -> StreamSecurity.REALITY
+            tls == "tls" -> StreamSecurity.TLS
+            else -> StreamSecurity.NONE
+        }
+
+        return ProxyConfig(
+            name = str("ps") ?: str("name") ?: host,
+            proto = when (type) {
+                "vmess" -> ProxyProtocol.VMESS
+                "trojan" -> ProxyProtocol.TROJAN
+                "shadowsocks", "ss" -> ProxyProtocol.SHADOWSOCKS
+                else -> ProxyProtocol.VLESS
+            },
+            address = host,
+            port = port,
+            uuid = id,
+            password = str("password"),
+            alterId = str("aid")?.toIntOrNull() ?: 0,
+            network = TransportNetwork.fromWire(str("net") ?: str("network")),
+            path = str("path"),
+            host = str("host"),
+            serviceName = str("serviceName") ?: str("path"),
+            security = security,
+            sni = str("sni") ?: str("serverName"),
+            alpn = str("alpn")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() },
+            allowInsecure = str("allowInsecure") in setOf("1", "true"),
+        )
+    }
+
+    /* ---------------- incy:// (Incyber format) ---------------- */
+
+    /**
+     * incy:// формат: base64-encoded JSON с расширенными полями
+     * Похож на happ://, но с дополнительными параметрами для XHTTP/REALITY
+     */
+    private fun parseIncy(line: String): ProxyConfig {
+        val b64 = line.removePrefix("incy://")
+        val json: JsonObject = runCatching {
+            Json.parseToJsonElement(base64Decode(b64)) as JsonObject
+        }.getOrNull() ?: throw LinkParseException("Malformed incy link")
+
+        fun str(key: String): String? = json[key]?.jsonPrimitive?.contentOrNull
+
+        val protocol = (str("protocol") ?: str("type") ?: "vless").lowercase()
+        val host = str("server") ?: str("address") ?: str("add") ?: throw LinkParseException("Missing server in incy link")
+        val port = str("port")?.toIntOrNull() ?: 443
+        val id = str("uuid") ?: str("id") ?: str("password") ?: throw LinkParseException("Missing credentials in incy link")
+
+        val security = when ((str("security") ?: str("tls") ?: "").lowercase()) {
+            "reality" -> StreamSecurity.REALITY
+            "tls" -> StreamSecurity.TLS
+            else -> StreamSecurity.NONE
+        }
+
+        val network = TransportNetwork.fromWire(str("network") ?: str("net") ?: str("transport"))
+
+        return ProxyConfig(
+            name = str("name") ?: str("ps") ?: str("remarks") ?: host,
+            proto = when (protocol) {
+                "vmess" -> ProxyProtocol.VMESS
+                "trojan" -> ProxyProtocol.TROJAN
+                "shadowsocks", "ss" -> ProxyProtocol.SHADOWSOCKS
+                else -> ProxyProtocol.VLESS
+            },
+            address = host,
+            port = port,
+            uuid = if (protocol in setOf("vless", "vmess")) id else null,
+            password = if (protocol in setOf("trojan", "shadowsocks", "ss")) id else null,
+            alterId = str("alterId")?.toIntOrNull() ?: str("aid")?.toIntOrNull() ?: 0,
+            method = str("cipher") ?: str("method"),
+            network = network,
+            path = str("path"),
+            host = str("host") ?: str("headerHost"),
+            serviceName = str("serviceName") ?: str("grpcServiceName"),
+            security = security,
+            sni = str("sni") ?: str("serverName") ?: str("peer"),
+            alpn = str("alpn")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() },
+            fingerprint = str("fingerprint") ?: str("fp"),
+            allowInsecure = str("allowInsecure") in setOf("1", "true"),
+            publicKey = str("publicKey") ?: str("pbk"),
+            shortId = str("shortId") ?: str("sid"),
+            spiderX = str("spiderX") ?: str("spx"),
+            flow = str("flow"),
+        )
     }
 }

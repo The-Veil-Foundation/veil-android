@@ -107,6 +107,16 @@ class DesktopPinger : Pinger {
                 ((System.nanoTime() - started) / 1_000_000L).toInt()
             }.getOrNull()
         }
+
+    /** isReachable шлёт ICMP, если у процесса есть права, иначе обращается к порту 7. */
+    override suspend fun icmp(server: ProxyConfig, timeoutMs: Int): Int? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val started = System.nanoTime()
+                val reachable = java.net.InetAddress.getByName(server.address).isReachable(timeoutMs)
+                if (reachable) ((System.nanoTime() - started) / 1_000_000L).toInt().coerceAtLeast(1) else null
+            }.getOrNull()
+        }
 }
 
 class DesktopLogProvider : LogProvider {

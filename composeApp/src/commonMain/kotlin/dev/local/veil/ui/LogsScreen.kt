@@ -49,6 +49,7 @@ fun LogsScreen(
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
+    val seen = remember { mutableSetOf<Any>() }
 
     suspend fun reload() {
         loading = true
@@ -66,6 +67,7 @@ fun LogsScreen(
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier
+                .staggerIn(seen, "bar", 0)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -108,13 +110,14 @@ fun LogsScreen(
             text = provider.path,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.staggerIn(seen, "path", 1).padding(horizontal = 16.dp, vertical = 4.dp),
         )
 
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier
+                .staggerIn(seen, "log", 2)
                 .fillMaxSize()
                 .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
         ) {

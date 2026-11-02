@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import dev.local.veil.core.AppSettings
 import dev.local.veil.core.ProxyConfig
 import dev.local.veil.core.Subscription
@@ -45,7 +48,11 @@ class AndroidPackageLister(context: Context) : PackageLister {
 
         apps.asSequence()
             // только то, что пользователь может запустить
-            .filter { packageManager.getLaunchIntentForPackage(it.packageName) != null }
+            // Android TV: часть приложений запускается только через leanback-лончер
+            .filter {
+                packageManager.getLaunchIntentForPackage(it.packageName) != null ||
+                    packageManager.getLeanbackLaunchIntentForPackage(it.packageName) != null
+            }
             .filter { it.packageName != selfPackage }
             .map {
                 AppEntry(
@@ -56,6 +63,12 @@ class AndroidPackageLister(context: Context) : PackageLister {
             }
             .sortedBy { it.label.lowercase() }
             .toList()
+    }
+
+    override suspend fun icon(packageName: String): ImageBitmap? = withContext(Dispatchers.IO) {
+        runCatching {
+            packageManager.getApplicationIcon(packageName).toBitmap(112, 112).asImageBitmap()
+        }.getOrNull()
     }
 }
 
@@ -68,6 +81,28 @@ class AndroidPinger : Pinger {
             }
             ((System.nanoTime() - started) / 1_000_000L).toInt()
         }.getOrNull()
+    }
+
+    /**
+     * Системный ping без root. Берём лучший из двух ответов, как делает
+     * обычный ping. -w страхует от зависания: утилита завершится сама.
+     */
+    override suspend fun icmp(server: ProxyConfig, timeoutMs: Int): Int? = withContext(Dispatchers.IO) {
+        var process: Process? = null
+        runCatching {
+            val seconds = ((timeoutMs + 999) / 1000).coerceAtLeast(1).toString()
+            val family = if (':' in server.address) "-6" else "-4"
+            process = ProcessBuilder(
+                "ping", family, "-n", "-c", "2", "-W", seconds, "-w", (seconds.toInt() + 1).toString(), server.address,
+            ).redirectErrorStream(true).start()
+            val output = process!!.inputStream.bufferedReader().readText()
+            process!!.waitFor()
+            Regex("""time[=<]\s*([0-9.]+)\s*ms""")
+                .findAll(output)
+                .mapNotNull { it.groupValues[1].toDoubleOrNull() }
+                .minOrNull()
+                ?.let { Math.round(it).toInt().coerceAtLeast(1) }
+        }.also { process?.destroy() }.getOrNull()
     }
 }
 

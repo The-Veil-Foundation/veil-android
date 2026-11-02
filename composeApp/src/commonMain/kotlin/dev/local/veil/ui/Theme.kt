@@ -10,6 +10,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /**
@@ -109,4 +110,20 @@ internal fun orbitShapes() = Shapes(
     extraLarge = RoundedCornerShape(44.dp),
 )
 
-internal fun orbitTypography() = Typography()
+/**
+ * Эмфатическая типографика M3 Expressive: заголовки и подписи плотнее и жирнее,
+ * чтобы акценты читались сильнее, чем в базовой шкале.
+ */
+internal fun orbitTypography(): Typography {
+    val base = Typography()
+    return base.copy(
+        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold),
+        headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold),
+        headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold),
+        titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold),
+        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+        labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        labelMedium = base.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+    )
+}

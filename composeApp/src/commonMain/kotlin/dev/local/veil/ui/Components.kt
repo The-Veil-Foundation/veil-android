@@ -123,31 +123,30 @@ fun StatusCard(
     val container by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(500),
+        animationSpec = tween(180),
         label = "status-bg",
     )
     val content by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.onPrimaryContainer
         else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(500),
+        animationSpec = tween(180),
         label = "status-fg",
     )
 
-    // Экспрессивные формы: при подключении карточка «раскрывается» в более
-    // круглую, при отключении собирается обратно. Пружина мягкая, с отскоком.
+    // Экспрессивная форма: карточка «раскрывается» при подключении, быстро.
     val big by animateFloatAsState(
         targetValue = if (connected) 52f else 32f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
+        animationSpec = tween(180),
         label = "status-corner",
     )
     val small by animateFloatAsState(
         targetValue = if (connected) 22f else 32f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
+        animationSpec = tween(180),
         label = "status-corner-small",
     )
     val lift by animateDpAsState(
         targetValue = if (connected) 6.dp else 0.dp,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
+        animationSpec = tween(180),
         label = "status-lift",
     )
 
@@ -167,12 +166,11 @@ fun StatusCard(
     ) {
         Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(connected = connected, working = working)
-                Spacer(Modifier.size(10.dp))
                 Text(
                     text = when {
                         checking -> "Проверяем сервер…"
                         status.phase == VpnPhase.CONNECTED -> "Защищено"
+                        status.phase == VpnPhase.PAUSED -> "Пауза"
                         status.phase == VpnPhase.CONNECTING -> "Подключаем…"
                         status.phase == VpnPhase.ERROR -> "Ошибка"
                         else -> "Не защищено"
@@ -210,8 +208,8 @@ fun StatusCard(
 
             AnimatedVisibility(
                 visible = connected,
-                enter = expandVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) + fadeIn(),
-                exit = shrinkVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) + fadeOut(),
+                enter = expandVertically(tween(180)) + fadeIn(),
+                exit = shrinkVertically(tween(180)) + fadeOut(),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpeedChip(label = "↓", bytesPerSecond = status.downlinkSpeed)
@@ -222,6 +220,7 @@ fun StatusCard(
             val label = when {
                 checking -> "Проверяем…"
                 status.phase == VpnPhase.CONNECTING -> "Подключаем…"
+                status.phase == VpnPhase.PAUSED -> "Возобновить"
                 connected -> "Отключить"
                 else -> "Подключить"
             }
@@ -239,15 +238,14 @@ fun StatusCard(
                     targetState = label,
                     transitionSpec = {
                         (fadeIn(tween(180)) + scaleIn(initialScale = 0.85f))
-                            .togetherWith(fadeOut(tween(120)) + scaleOut(targetScale = 0.85f))
+                            .togetherWith(fadeOut(tween(180)) + scaleOut(targetScale = 0.85f))
                     },
                     label = "button-label",
                 ) { text ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (text.endsWith("…")) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
+                            VpnConnectSpinner(
+                                diameter = 22.dp,
                                 color = MaterialTheme.colorScheme.onPrimary,
                             )
                         } else {
@@ -264,37 +262,6 @@ fun StatusCard(
                 }
             }
         }
-    }
-}
-
-/** Точка состояния с пульсирующим ореолом, когда туннель поднят. */
-@Composable
-private fun StatusDot(connected: Boolean, working: Boolean) {
-    val scheme = MaterialTheme.colorScheme
-    val pulse = rememberInfiniteTransition(label = "dot")
-    val phase by pulse.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing)),
-        label = "dot-phase",
-    )
-    val dotColor by animateColorAsState(
-        when {
-            connected -> scheme.primary
-            working -> scheme.tertiary
-            else -> scheme.outline
-        },
-        label = "dot-color",
-    )
-
-    Canvas(Modifier.size(18.dp)) {
-        if (connected) {
-            drawCircle(
-                color = dotColor.copy(alpha = (1f - phase) * 0.35f),
-                radius = size.minDimension / 2f * (0.45f + phase * 0.55f),
-            )
-        }
-        drawCircle(color = dotColor, radius = size.minDimension / 2f * 0.42f)
     }
 }
 
@@ -324,13 +291,13 @@ fun CompactStatusBar(
     val container by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(350),
+        animationSpec = tween(180),
         label = "compact-bg",
     )
     val content by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.onPrimaryContainer
         else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(350),
+        animationSpec = tween(180),
         label = "compact-fg",
     )
     val shape = RoundedCornerShape(26.dp)
@@ -346,7 +313,8 @@ fun CompactStatusBar(
             Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            StatusDot(connected = connected, working = working)
+            // Вместо точки — форма: перетекает из круга в «печенье», когда туннель поднят.
+            StatusShape(connected = connected, working = working)
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -362,6 +330,7 @@ fun CompactStatusBar(
                             when {
                                 checkingServer != null -> "Проверяем…"
                                 status.phase == VpnPhase.CONNECTED -> "Защищено"
+                                status.phase == VpnPhase.PAUSED -> "Пауза"
                                 status.phase == VpnPhase.CONNECTING -> "Подключаем…"
                                 status.phase == VpnPhase.ERROR -> "Ошибка"
                                 else -> "Не защищено"
@@ -410,7 +379,7 @@ fun CompactStatusBar(
 private fun SpeedChip(label: String, bytesPerSecond: Long) {
     val animated by animateFloatAsState(
         targetValue = bytesPerSecond.toFloat(),
-        animationSpec = tween(600),
+        animationSpec = tween(180),
         label = "speed-$label",
     )
     Surface(
@@ -431,7 +400,7 @@ private fun SpeedChip(label: String, bytesPerSecond: Long) {
 @Composable
 fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
     val scheme = MaterialTheme.colorScheme
-    val (bg, fg) = when {
+    val (bgTarget, fgTarget) = when {
         pinging && !measured -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         !measured -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         ms == null -> scheme.errorContainer to scheme.onErrorContainer
@@ -439,21 +408,33 @@ fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
         ms < 300 -> scheme.tertiaryContainer to scheme.onTertiaryContainer
         else -> scheme.secondaryContainer to scheme.onSecondaryContainer
     }
+    // Цвет плавно перетекает, когда замер закончился или пинг изменился.
+    val bg by animateColorAsState(bgTarget, label = "ping-bg")
+    val fg by animateColorAsState(fgTarget, label = "ping-fg")
     Surface(shape = RoundedCornerShape(10.dp), color = bg, contentColor = fg) {
         Row(
             Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (pinging) {
-                CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = fg)
+            if (pinging && !measured) {
+                ExpressiveLoader(diameter = 12.dp, color = fg)
             } else {
                 Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.size(2.dp))
-                Text(
-                    text = ms?.let { "$it" } ?: "—",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                )
+                AnimatedContent(
+                    targetState = ms,
+                    transitionSpec = {
+                        (slideInVertically(tween(180)) { it } + fadeIn()) togetherWith
+                            (slideOutVertically { -it } + fadeOut())
+                    },
+                    label = "ping-value",
+                ) { value ->
+                    Text(
+                        text = value?.let { "$it" } ?: "—",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
     }
@@ -476,8 +457,8 @@ fun BulletinHost(
 
     AnimatedVisibility(
         visible = bulletin != null,
-        enter = fadeIn(tween(180)) + slideInVertically(spring(dampingRatio = 0.7f)) { it },
-        exit = fadeOut(tween(160)) + slideOutVertically(tween(160)) { it },
+        enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it },
+        exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it },
         modifier = modifier,
     ) {
         val current = shown ?: return@AnimatedVisibility
@@ -516,18 +497,6 @@ fun BulletinHost(
             }
         }
     }
-}
-
-/** Заголовок группы настроек. */
-@Composable
-fun GroupTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 6.dp, top = 10.dp),
-    )
 }
 
 fun formatBytes(bytes: Long): String = when {

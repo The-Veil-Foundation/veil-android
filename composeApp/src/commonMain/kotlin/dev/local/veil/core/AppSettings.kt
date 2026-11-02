@@ -2,6 +2,13 @@ package dev.local.veil.core
 
 import kotlinx.serialization.Serializable
 
+/** Ядро прокси: Xray или sing-box. */
+@Serializable
+enum class CoreEngine {
+    XRAY,
+    SING_BOX,
+}
+
 /** Как приложения распределяются между туннелем и обычной сетью. */
 @Serializable
 enum class SplitMode {
@@ -17,6 +24,7 @@ enum class SplitMode {
 
 @Serializable
 data class AppSettings(
+    val coreEngine: CoreEngine = CoreEngine.XRAY,
     val mtu: Int = 1500,
     val ipv6: Boolean = true,
     val dns: List<String> = listOf("1.1.1.1", "1.0.0.1"),

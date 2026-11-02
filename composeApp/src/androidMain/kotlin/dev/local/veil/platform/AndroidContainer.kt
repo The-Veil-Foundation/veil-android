@@ -1,5 +1,7 @@
 package dev.local.veil.platform
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import android.content.Context
 import android.net.VpnService
 import androidx.activity.ComponentActivity
@@ -86,54 +88,101 @@ class AndroidVpnController(
             )
         }
 
-    override suspend fun probe(server: ProxyConfig, options: TunnelOptions): Boolean =
+    /** Пробное ядро одно на всё приложение, поэтому проверки идут строго по очереди. */
+    private val probeMutex = Mutex()
+
+    /**
+     * Поднимает второй экземпляр ядра с локальным SOCKS под одноразовым паролем,
+     * отдаёт порт блоку и гасит ядро. Рабочий туннель продолжает жить.
+     */
+    private suspend fun <T> withProbeCore(
+        server: ProxyConfig,
+        options: TunnelOptions,
+        block: (port: Int) -> T,
+    ): T? = probeMutex.withLock {
         withContext(Dispatchers.IO) {
-            if (!coreAvailable) return@withContext false
+            if (!coreAvailable) return@withContext null
             // Пробное ядро пишет в отдельный файл: два экземпляра в одном
             // файле мешали бы друг другу.
             val probeLog = logFile.takeIf { it.isNotEmpty() }?.let { "$it.probe" }
             val effective = options.copy(logFile = probeLog, logLevel = "debug")
             val port = 21000 + (System.nanoTime() % 500).toInt()
+            // Одноразовый логин/пароль: пока идёт проверка, чужое приложение
+            // на телефоне не сможет пустить трафик через этот SOCKS.
+            val rnd = java.security.SecureRandom()
+            val user = "p" + java.math.BigInteger(64, rnd).toString(16)
+            val pass = java.math.BigInteger(128, rnd).toString(16)
             val config = resolveEndpoints(
-                XrayConfig.json(server, effective, XrayInbound.LocalProxy(socks = port, http = port + 1)),
+                XrayConfig.json(server, effective, XrayInbound.LocalProxy(socks = port, http = port + 1, user = user, pass = pass)),
                 dump = false,
             )
             try {
-                // Проверка идёт во втором экземпляре ядра: рабочий туннель
-                // продолжает жить, соединения не рвутся.
                 XrayBridge.startProbe(config, geoDirectory)
                     .onFailure { android.util.Log.w("VeilXray", "пробное ядро не поднялось: ${it.message}") }
-                    .getOrElse { return@withContext false }
-
-                // Один редкий обрыв не должен отменять переключение:
-                // вторая попытка идёт по свежему соединению.
-                probeThroughSocks(port) || probeThroughSocks(port)
+                    .getOrElse { return@withContext null }
+                java.net.Authenticator.setDefault(object : java.net.Authenticator() {
+                    override fun getPasswordAuthentication() =
+                        java.net.PasswordAuthentication(user, pass.toCharArray())
+                })
+                block(port)
             } finally {
+                java.net.Authenticator.setDefault(null)
                 runCatching { XrayBridge.stopProbe() }
             }
         }
+    }
 
-    /** Запрос через локальный SOCKS: любой HTTP-ответ значит, что узел живой. */
-    private fun probeThroughSocks(port: Int): Boolean = runCatching {
+    override suspend fun probe(server: ProxyConfig, options: TunnelOptions): Boolean =
+        // Один редкий обрыв не должен отменять переключение: вторая попытка
+        // идёт по свежему соединению.
+        withProbeCore(server, options) { port ->
+            requestThroughSocks(port, 5000) != null || requestThroughSocks(port, 5000) != null
+        } ?: false
+
+    override suspend fun realPing(server: ProxyConfig, options: TunnelOptions, timeoutMs: Int): Int? =
+        withProbeCore(server, options) { port ->
+            // Первый запрос платит за старт ядра, DNS, TCP и TLS — это не пинг,
+            // он только проверяет, что узел живой.
+            val cold = requestThroughSocks(port, timeoutMs) ?: requestThroughSocks(port, timeoutMs)
+                ?: return@withProbeCore null
+            // Следующие идут по уже открытому соединению: чистый RTT пути.
+            val warm = listOfNotNull(
+                requestThroughSocks(port, timeoutMs),
+                requestThroughSocks(port, timeoutMs),
+            )
+            warm.minOrNull() ?: cold
+        }
+
+    /**
+     * Запрос через локальный SOCKS. Возвращает время до ответа в мс,
+     * null — не получилось. Любой HTTP-ответ значит, что узел живой.
+     */
+    private fun requestThroughSocks(port: Int, timeoutMs: Int): Int? = runCatching {
         val proxy = java.net.Proxy(
             java.net.Proxy.Type.SOCKS,
             java.net.InetSocketAddress.createUnresolved("127.0.0.1", port),
         )
+        val started = System.nanoTime()
         val connection = java.net.URL(PROBE_URL).openConnection(proxy) as java.net.HttpURLConnection
-        connection.connectTimeout = 5000
-        connection.readTimeout = 5000
+        connection.connectTimeout = timeoutMs
+        connection.readTimeout = timeoutMs
         connection.instanceFollowRedirects = false
         connection.requestMethod = "GET"
-        try {
-            connection.responseCode > 0
-        } finally {
-            connection.disconnect()
-        }
-    }.onFailure { android.util.Log.w("VeilXray", "проверка узла не прошла: ${it.message}") }
-        .getOrDefault(false)
+        val code = connection.responseCode
+        val elapsed = ((System.nanoTime() - started) / 1_000_000L).toInt()
+        // Дочитываем ответ и не вызываем disconnect(): соединение возвращается
+        // в пул, и следующий замер идёт без рукопожатия.
+        runCatching { (connection.errorStream ?: connection.inputStream).use { it.readBytes() } }
+        if (code > 0) elapsed.coerceAtLeast(1) else null
+    }.onFailure { android.util.Log.w("VeilXray", "запрос через узел не прошёл: ${it.message}") }
+        .getOrNull()
 
     override suspend fun disconnect() {
         VeilVpnService.stop(activity.applicationContext)
+    }
+
+    override suspend fun resume() {
+        VeilVpnService.togglePause(activity.applicationContext)
     }
 
     /**
@@ -149,7 +198,14 @@ class AndroidVpnController(
 
             if (_status.value.isConnected) {
                 val config = resolveEndpoints(XrayConfig.json(server, effective))
-                VeilVpnService.reload(activity.applicationContext, config, server.name)
+                val settings = settingsStore.load()
+                VeilVpnService.reload(
+                    activity.applicationContext,
+                    config,
+                    server.name,
+                    splitMode = settings.splitMode,
+                    splitPackages = settings.splitPackages,
+                )
             } else {
                 if (!ensurePermission()) error("Разрешение на VPN не выдано")
                 val settings = settingsStore.load()
@@ -305,6 +361,7 @@ class AndroidContainer(activity: ComponentActivity) : AppContainer {
     override val settings: SettingsStore = AndroidSettingsStore(activity.applicationContext)
     override val vpn: VpnController = AndroidVpnController(activity, geoDir, logPath, settings)
     override val logs: LogProvider = AndroidLogProvider(java.io.File(logPath))
+    override val transfer: TransferService = AndroidTransferService(activity.applicationContext)
     override val update: UpdateService = AndroidUpdateService(activity.applicationContext)
     override val geoDirectory: String = geoDir
     override val subscriptions: SubscriptionFetcher = AndroidSubscriptionFetcher(activity.applicationContext)
