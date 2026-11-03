@@ -2,11 +2,10 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.8"
-        android:fillColor="#00000000"
-        android:pathData="M54,28 A26,26 0 1,1 53.9,28 Z" />
-    <path android:strokeColor="#FFFFFF" android:strokeWidth="5.4"
-        android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:fillColor="#00000000"
-        android:pathData="M44,44 L54,64 L64,44" />
+    <!-- щит Veil из двух половин -->
+    <group android:scaleX="0.5625" android:scaleY="0.5625"
+        android:translateX="-12.96" android:translateY="-5.94">
+        <path android:fillColor="#FFFFFF" android:pathData="M124.416 51.264L73.344 68.736V102.336C73.344 126.528 86.784 144 105.6 154.752L113.664 135.936C100.224 127.872 92.16 117.12 92.16 100.992V82.176L117.696 72.768L124.416 51.264Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M139.2 56.64L164.736 66.048V100.992C164.736 125.184 151.296 144 123.072 158.784L131.136 131.904C140.544 122.496 145.92 111.744 145.92 99.648V80.832L132.48 75.456L139.2 56.64Z" />
+    </group>
 </vector>
