@@ -29,6 +29,8 @@ kotlin {
                 implementation(compose.components.resources)
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.coroutines.core)
+                // M3 Expressive: морфинг фигур из официальной библиотеки graphics-shapes
+                implementation("androidx.graphics:graphics-shapes:1.1.0")
             }
         }
         val androidMain by getting {

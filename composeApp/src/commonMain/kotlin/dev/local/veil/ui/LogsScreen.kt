@@ -10,10 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -49,6 +45,7 @@ fun LogsScreen(
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
+    val seen = remember { mutableSetOf<Any>() }
 
     suspend fun reload() {
         loading = true
@@ -66,6 +63,7 @@ fun LogsScreen(
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier
+                .staggerIn(seen, "bar", 0)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -74,33 +72,33 @@ fun LogsScreen(
                 onClick = {
                     scope.launch {
                         reload()
-                        onBulletin("Лог обновлён")
+                        onBulletin(tr("Лог обновлён", "Log refreshed"))
                     }
                 },
             ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text(" Обновить")
+                AppIcon(AppIcons.Refresh, modifier = Modifier.size(18.dp))
+                Text(tr(" Обновить", " Refresh"))
             }
             TextButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(lines.joinToString("\n")))
-                    onBulletin("Лог скопирован в буфер обмена")
+                    onBulletin(tr("Лог скопирован в буфер обмена", "Log copied to clipboard"))
                 },
             ) {
-                Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text(" Копировать")
+                AppIcon(AppIcons.Copy, modifier = Modifier.size(18.dp))
+                Text(tr(" Копировать", " Copy"))
             }
             TextButton(
                 onClick = {
                     provider.clear()
                     scope.launch {
                         reload()
-                        onBulletin("Лог очищен")
+                        onBulletin(tr("Лог очищен", "Log cleared"))
                     }
                 },
             ) {
-                Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text(" Очистить")
+                AppIcon(AppIcons.Trash, modifier = Modifier.size(18.dp))
+                Text(tr(" Очистить", " Clear"))
             }
         }
 
@@ -108,19 +106,20 @@ fun LogsScreen(
             text = provider.path,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.staggerIn(seen, "path", 1).padding(horizontal = 16.dp, vertical = 4.dp),
         )
 
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier
+                .staggerIn(seen, "log", 2)
                 .fillMaxSize()
                 .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
         ) {
             if (loading) {
                 Text(
-                    "Читаю лог…",
+                    tr("Читаю лог…", "Reading log…"),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(16.dp),
                 )

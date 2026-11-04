@@ -1,12 +1,13 @@
 package dev.local.veil.platform
 
 import dev.local.veil.core.AppSettings
+import dev.local.veil.core.GeoAssetSource
 import dev.local.veil.core.ProxyConfig
 import dev.local.veil.core.Subscription
 import dev.local.veil.core.TunnelOptions
 import kotlinx.coroutines.flow.StateFlow
 
-enum class VpnPhase { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
+enum class VpnPhase { DISCONNECTED, CONNECTING, CONNECTED, PAUSED, ERROR }
 
 data class VpnStatus(
     val phase: VpnPhase = VpnPhase.DISCONNECTED,
@@ -21,6 +22,7 @@ data class VpnStatus(
     val connectedSince: Long = 0,
 ) {
     val isConnected: Boolean get() = phase == VpnPhase.CONNECTED
+    val isPaused: Boolean get() = phase == VpnPhase.PAUSED
     val isBusy: Boolean get() = phase == VpnPhase.CONNECTING
 }
 
@@ -37,8 +39,16 @@ interface VpnController {
      */
     suspend fun probe(server: ProxyConfig, options: TunnelOptions): Boolean
 
+    /**
+     * Реальная задержка: запрос через ядро и сервер, по уже открытому
+     * соединению — то есть чистый RTT пути «телефон → сервер → интернет».
+     * null — узел не отвечает или ядра нет.
+     */
+    suspend fun realPing(server: ProxyConfig, options: TunnelOptions, timeoutMs: Int = 4000): Int? = null
+
     suspend fun connect(server: ProxyConfig, options: TunnelOptions): Result<Unit>
     suspend fun disconnect()
+    suspend fun resume() {}
     suspend fun reconnect(server: ProxyConfig, options: TunnelOptions): Result<Unit>
     fun clearError()
 }
@@ -76,6 +86,10 @@ data class SubscriptionUsage(
 data class SubscriptionFetch(
     val body: String,
     val usage: SubscriptionUsage? = null,
+    val title: String = "",
+    val description: String = "",
+    val supportUrl: String = "",
+    val webUrl: String = "",
 )
 
 interface SubscriptionFetcher {
@@ -87,6 +101,13 @@ interface SubscriptionFetcher {
      * или полный конфиг с маршрутами. Выбор UA — это выбор формата.
      */
     var userAgent: String
+}
+
+/** geoip.dat / geosite.dat для правил geosite:/geoip:. */
+interface GeoService {
+    val directory: String
+    val hasAssets: Boolean
+    suspend fun download(source: GeoAssetSource): Result<Unit>
 }
 
 /** Доступ к логам ядра из интерфейса. */
@@ -122,7 +143,11 @@ interface AppContainer {
     val store: ServerStore
     val settings: SettingsStore
     val geoDirectory: String
+    val geo: GeoService
     val subscriptions: SubscriptionFetcher
     val packages: PackageLister
     val pinger: Pinger
+
+    /** Перенос на другие устройства и «Поделиться»; по умолчанию недоступен. */
+    val transfer: TransferService get() = NoTransferService
 }

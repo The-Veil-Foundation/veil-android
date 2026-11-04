@@ -34,13 +34,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -57,6 +50,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,36 +60,60 @@ import dev.local.veil.platform.VpnPhase
 import dev.local.veil.platform.VpnStatus
 import kotlinx.coroutines.delay
 
-/** Логотип: монета с буквой V. */
+/**
+ * Логотип Veil — открытый защитный контур из Figma.
+ * Цвета берутся из темы, поэтому знак подстраивается под системную палитру.
+ */
 @Composable
-fun VeilMark(size: androidx.compose.ui.unit.Dp = 36.dp, modifier: Modifier = Modifier) {
-    val primary = MaterialTheme.colorScheme.primary
-    val onPrimary = MaterialTheme.colorScheme.onPrimary
+fun VeilMark(
+    size: androidx.compose.ui.unit.Dp = 36.dp,
+    modifier: Modifier = Modifier,
+    background: Color = Color(0xFFDCE8D5),
+    foreground: Color = Color(0xFF304E40),
+) {
     Canvas(modifier.size(size)) {
-        val radius = this.size.minDimension / 2f
-        drawCircle(color = primary, radius = radius)
-        drawCircle(
-            color = onPrimary.copy(alpha = 0.35f),
-            radius = radius - radius * 0.09f,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = radius * 0.06f),
-        )
-        val w = radius * 0.46f
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(center.x - w * 0.85f, center.y - w * 0.6f)
-            lineTo(center.x, center.y + w * 0.75f)
-            lineTo(center.x + w * 0.85f, center.y - w * 0.6f)
+        drawCircle(color = background, radius = this.size.minDimension / 2f)
+        val s = this.size.minDimension / 192f
+        val offset = (this.size.minDimension - 132.5f * s) / 2f
+        translate(left = offset, top = offset) {
+            scale(
+                scale = s,
+                pivot = androidx.compose.ui.geometry.Offset.Zero,
+            ) {
+                drawPath(leftShieldPath(), foreground)
+                drawPath(rightShieldPath(), foreground)
+            }
         }
-        drawPath(
-            path = path,
-            color = onPrimary,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = radius * 0.2f,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round,
-            ),
-        )
     }
 }
+
+private fun leftShieldPath(): androidx.compose.ui.graphics.Path =
+    androidx.compose.ui.graphics.Path().apply {
+        moveTo(71.55f, 14.575f)
+        lineTo(21.2f, 31.8f)
+        lineTo(21.2f, 64.925f)
+        cubicTo(21.2f, 88.775f, 34.45f, 106f, 53f, 116.6f)
+        lineTo(60.95f, 98.05f)
+        cubicTo(47.7f, 90.1f, 39.75f, 79.5f, 39.75f, 63.6f)
+        lineTo(39.75f, 45.05f)
+        lineTo(64.925f, 35.775f)
+        lineTo(71.55f, 14.575f)
+        close()
+    }
+
+private fun rightShieldPath(): androidx.compose.ui.graphics.Path =
+    androidx.compose.ui.graphics.Path().apply {
+        moveTo(86.125f, 19.875f)
+        lineTo(111.3f, 29.15f)
+        lineTo(111.3f, 63.6f)
+        cubicTo(111.3f, 87.45f, 98.05f, 106f, 70.225f, 120.575f)
+        lineTo(78.175f, 94.075f)
+        cubicTo(87.45f, 84.8f, 92.75f, 74.2f, 92.75f, 62.275f)
+        lineTo(92.75f, 43.725f)
+        lineTo(79.5f, 38.425f)
+        lineTo(86.125f, 19.875f)
+        close()
+    }
 
 /** Крупная статус-карточка: состояние, трафик, таймер, кнопка. */
 @Composable
@@ -123,31 +142,30 @@ fun StatusCard(
     val container by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(500),
+        animationSpec = tween(180),
         label = "status-bg",
     )
     val content by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.onPrimaryContainer
         else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(500),
+        animationSpec = tween(180),
         label = "status-fg",
     )
 
-    // Экспрессивные формы: при подключении карточка «раскрывается» в более
-    // круглую, при отключении собирается обратно. Пружина мягкая, с отскоком.
+    // Экспрессивная форма: карточка «раскрывается» при подключении, быстро.
     val big by animateFloatAsState(
-        targetValue = if (connected) 52f else 32f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
+        targetValue = if (connected) 44f else 32f,
+        animationSpec = tween(180),
         label = "status-corner",
     )
     val small by animateFloatAsState(
-        targetValue = if (connected) 22f else 32f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
+        targetValue = if (connected) 24f else 32f,
+        animationSpec = tween(180),
         label = "status-corner-small",
     )
     val lift by animateDpAsState(
         targetValue = if (connected) 6.dp else 0.dp,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
+        animationSpec = tween(180),
         label = "status-lift",
     )
 
@@ -167,15 +185,14 @@ fun StatusCard(
     ) {
         Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(connected = connected, working = working)
-                Spacer(Modifier.size(10.dp))
                 Text(
                     text = when {
-                        checking -> "Проверяем сервер…"
-                        status.phase == VpnPhase.CONNECTED -> "Защищено"
-                        status.phase == VpnPhase.CONNECTING -> "Подключаем…"
-                        status.phase == VpnPhase.ERROR -> "Ошибка"
-                        else -> "Не защищено"
+                        checking -> tr("Проверяем сервер…", "Checking server…")
+                        status.phase == VpnPhase.CONNECTED -> tr("Защищено", "Protected")
+                        status.phase == VpnPhase.PAUSED -> tr("Пауза", "Paused")
+                        status.phase == VpnPhase.CONNECTING -> tr("Подключаем…", "Connecting…")
+                        status.phase == VpnPhase.ERROR -> tr("Ошибка", "Error")
+                        else -> tr("Не защищено", "Unprotected")
                     },
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
@@ -196,7 +213,7 @@ fun StatusCard(
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = shown?.name ?: "Сервер не выбран",
+                    text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
@@ -210,8 +227,8 @@ fun StatusCard(
 
             AnimatedVisibility(
                 visible = connected,
-                enter = expandVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) + fadeIn(),
-                exit = shrinkVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) + fadeOut(),
+                enter = expandVertically(tween(180)) + fadeIn(),
+                exit = shrinkVertically(tween(180)) + fadeOut(),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpeedChip(label = "↓", bytesPerSecond = status.downlinkSpeed)
@@ -220,10 +237,11 @@ fun StatusCard(
             }
 
             val label = when {
-                checking -> "Проверяем…"
-                status.phase == VpnPhase.CONNECTING -> "Подключаем…"
-                connected -> "Отключить"
-                else -> "Подключить"
+                checking -> tr("Проверяем…", "Checking…")
+                status.phase == VpnPhase.CONNECTING -> tr("Подключаем…", "Connecting…")
+                status.phase == VpnPhase.PAUSED -> tr("Возобновить", "Resume")
+                connected -> tr("Отключить", "Disconnect")
+                else -> tr("Подключить", "Connect")
             }
 
             Button(
@@ -239,22 +257,19 @@ fun StatusCard(
                     targetState = label,
                     transitionSpec = {
                         (fadeIn(tween(180)) + scaleIn(initialScale = 0.85f))
-                            .togetherWith(fadeOut(tween(120)) + scaleOut(targetScale = 0.85f))
+                            .togetherWith(fadeOut(tween(180)) + scaleOut(targetScale = 0.85f))
                     },
                     label = "button-label",
                 ) { text ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (text.endsWith("…")) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
+                            VpnConnectSpinner(
+                                diameter = 22.dp,
                                 color = MaterialTheme.colorScheme.onPrimary,
                             )
                         } else {
-                            Icon(
-                                imageVector = if (text == "Отключить") Icons.Rounded.Shield
-                                else Icons.Rounded.PowerSettingsNew,
-                                contentDescription = null,
+                            AppIcon(
+                                icon = if (connected) AppIcons.Shield else AppIcons.Power,
                                 modifier = Modifier.size(20.dp),
                             )
                         }
@@ -264,37 +279,6 @@ fun StatusCard(
                 }
             }
         }
-    }
-}
-
-/** Точка состояния с пульсирующим ореолом, когда туннель поднят. */
-@Composable
-private fun StatusDot(connected: Boolean, working: Boolean) {
-    val scheme = MaterialTheme.colorScheme
-    val pulse = rememberInfiniteTransition(label = "dot")
-    val phase by pulse.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing)),
-        label = "dot-phase",
-    )
-    val dotColor by animateColorAsState(
-        when {
-            connected -> scheme.primary
-            working -> scheme.tertiary
-            else -> scheme.outline
-        },
-        label = "dot-color",
-    )
-
-    Canvas(Modifier.size(18.dp)) {
-        if (connected) {
-            drawCircle(
-                color = dotColor.copy(alpha = (1f - phase) * 0.35f),
-                radius = size.minDimension / 2f * (0.45f + phase * 0.55f),
-            )
-        }
-        drawCircle(color = dotColor, radius = size.minDimension / 2f * 0.42f)
     }
 }
 
@@ -324,16 +308,16 @@ fun CompactStatusBar(
     val container by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(350),
+        animationSpec = tween(180),
         label = "compact-bg",
     )
     val content by animateColorAsState(
         if (connected) MaterialTheme.colorScheme.onPrimaryContainer
         else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(350),
+        animationSpec = tween(180),
         label = "compact-fg",
     )
-    val shape = RoundedCornerShape(26.dp)
+    val shape = Md3Shapes.card
 
     Surface(
         color = container,
@@ -346,11 +330,12 @@ fun CompactStatusBar(
             Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            StatusDot(connected = connected, working = working)
+            // Вместо точки — форма: перетекает из круга в «печенье», когда туннель поднят.
+            StatusShape(connected = connected, working = working)
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = shown?.name ?: "Сервер не выбран",
+                    text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -360,11 +345,12 @@ fun CompactStatusBar(
                     text = buildString {
                         append(
                             when {
-                                checkingServer != null -> "Проверяем…"
-                                status.phase == VpnPhase.CONNECTED -> "Защищено"
-                                status.phase == VpnPhase.CONNECTING -> "Подключаем…"
-                                status.phase == VpnPhase.ERROR -> "Ошибка"
-                                else -> "Не защищено"
+                                checkingServer != null -> tr("Проверяем…", "Checking…")
+                                status.phase == VpnPhase.CONNECTED -> tr("Защищено", "Protected")
+                                status.phase == VpnPhase.PAUSED -> tr("Пауза", "Paused")
+                                status.phase == VpnPhase.CONNECTING -> tr("Подключаем…", "Connecting…")
+                                status.phase == VpnPhase.ERROR -> tr("Ошибка", "Error")
+                                else -> tr("Не защищено", "Unprotected")
                             },
                         )
                         if (connected) append(" · ").append(formatDuration(seconds))
@@ -394,9 +380,9 @@ fun CompactStatusBar(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                 } else {
-                    Icon(
-                        imageVector = if (connected) Icons.Rounded.Shield else Icons.Rounded.PowerSettingsNew,
-                        contentDescription = if (connected) "Отключить" else "Подключить",
+                    AppIcon(
+                        icon = if (connected) AppIcons.Shield else AppIcons.Power,
+                        contentDescription = if (connected) tr("Отключить", "Disconnect") else tr("Подключить", "Connect"),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -410,7 +396,7 @@ fun CompactStatusBar(
 private fun SpeedChip(label: String, bytesPerSecond: Long) {
     val animated by animateFloatAsState(
         targetValue = bytesPerSecond.toFloat(),
-        animationSpec = tween(600),
+        animationSpec = tween(180),
         label = "speed-$label",
     )
     Surface(
@@ -431,7 +417,7 @@ private fun SpeedChip(label: String, bytesPerSecond: Long) {
 @Composable
 fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
     val scheme = MaterialTheme.colorScheme
-    val (bg, fg) = when {
+    val (bgTarget, fgTarget) = when {
         pinging && !measured -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         !measured -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         ms == null -> scheme.errorContainer to scheme.onErrorContainer
@@ -439,21 +425,33 @@ fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
         ms < 300 -> scheme.tertiaryContainer to scheme.onTertiaryContainer
         else -> scheme.secondaryContainer to scheme.onSecondaryContainer
     }
+    // Цвет плавно перетекает, когда замер закончился или пинг изменился.
+    val bg by animateColorAsState(bgTarget, label = "ping-bg")
+    val fg by animateColorAsState(fgTarget, label = "ping-fg")
     Surface(shape = RoundedCornerShape(10.dp), color = bg, contentColor = fg) {
         Row(
             Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (pinging) {
-                CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = fg)
+            if (pinging && !measured) {
+                ExpressiveLoader(diameter = 12.dp, color = fg)
             } else {
-                Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(12.dp))
+                AppIcon(AppIcons.Bolt, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.size(2.dp))
-                Text(
-                    text = ms?.let { "$it" } ?: "—",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                )
+                AnimatedContent(
+                    targetState = ms,
+                    transitionSpec = {
+                        (slideInVertically(tween(180)) { it } + fadeIn()) togetherWith
+                            (slideOutVertically { -it } + fadeOut())
+                    },
+                    label = "ping-value",
+                ) { value ->
+                    Text(
+                        text = value?.let { "$it" } ?: "—",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
     }
@@ -476,8 +474,8 @@ fun BulletinHost(
 
     AnimatedVisibility(
         visible = bulletin != null,
-        enter = fadeIn(tween(180)) + slideInVertically(spring(dampingRatio = 0.7f)) { it },
-        exit = fadeOut(tween(160)) + slideOutVertically(tween(160)) { it },
+        enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it },
+        exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it },
         modifier = modifier,
     ) {
         val current = shown ?: return@AnimatedVisibility
@@ -488,9 +486,9 @@ fun BulletinHost(
 
         val scheme = MaterialTheme.colorScheme
         val (bg, fg, icon) = when (current.kind) {
-            BulletinKind.SUCCESS -> Triple(scheme.primaryContainer, scheme.onPrimaryContainer, Icons.Rounded.CheckCircle)
-            BulletinKind.ERROR -> Triple(scheme.errorContainer, scheme.onErrorContainer, Icons.Rounded.ErrorOutline)
-            BulletinKind.INFO -> Triple(scheme.secondaryContainer, scheme.onSecondaryContainer, Icons.Rounded.Info)
+            BulletinKind.SUCCESS -> Triple(scheme.primaryContainer, scheme.onPrimaryContainer, AppIcons.Check)
+            BulletinKind.ERROR -> Triple(scheme.errorContainer, scheme.onErrorContainer, AppIcons.Danger)
+            BulletinKind.INFO -> Triple(scheme.secondaryContainer, scheme.onSecondaryContainer, AppIcons.Info)
         }
 
         Surface(
@@ -506,7 +504,7 @@ fun BulletinHost(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                AppIcon(icon, modifier = Modifier.size(20.dp))
                 Text(
                     text = current.text,
                     style = MaterialTheme.typography.bodyMedium,
@@ -518,32 +516,21 @@ fun BulletinHost(
     }
 }
 
-/** Заголовок группы настроек. */
-@Composable
-fun GroupTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 6.dp, top = 10.dp),
-    )
-}
-
 fun formatBytes(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes Б"
-    bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
-    bytes < 1024L * 1024 * 1024 -> "${bytes / (1024 * 1024)} МБ"
-    else -> "${bytes / (1024L * 1024 * 1024)} ГБ"
+    bytes < 1024 -> "$bytes " + tr("Б", "B")
+    bytes < 1024 * 1024 -> "${bytes / 1024} " + tr("КБ", "KB")
+    bytes < 1024L * 1024 * 1024 -> "${bytes / (1024 * 1024)} " + tr("МБ", "MB")
+    else -> "${bytes / (1024L * 1024 * 1024)} " + tr("ГБ", "GB")
 }
 
 /** Скорость: до сотни КБ/с — в килобайтах, дальше в мегабитах. */
 fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond < 1024) return "$bytesPerSecond Б/с"
-    if (bytesPerSecond < 100 * 1024) return "${bytesPerSecond / 1024} КБ/с"
+    if (bytesPerSecond < 1024) return "$bytesPerSecond " + tr("Б/с", "B/s")
+    if (bytesPerSecond < 100 * 1024) return "${bytesPerSecond / 1024} " + tr("КБ/с", "KB/s")
     val megabits = bytesPerSecond * 8.0 / 1_000_000.0
     val tenths = (megabits * 10).toInt()
-    return "${tenths / 10},${tenths % 10} Мбит/с"
+    val separator = if (AppLocale.language == dev.local.veil.core.AppLanguage.EN) "." else ","
+    return "${tenths / 10}$separator${tenths % 10} " + tr("Мбит/с", "Mbit/s")
 }
 
 fun formatDuration(totalSeconds: Int): String {
@@ -574,12 +561,12 @@ fun daysUntil(epochSeconds: Long, now: Long = currentTimeMillis()): Long =
     if (epochSeconds <= 0) Long.MAX_VALUE else (epochSeconds - now / 1000) / 86400
 
 fun formatAgo(timestamp: Long, now: Long = currentTimeMillis()): String {
-    if (timestamp <= 0) return "не обновлялась"
+    if (timestamp <= 0) return tr("не обновлялась", "never updated")
     val minutes = (now - timestamp) / 60_000
     return when {
-        minutes < 1 -> "только что"
-        minutes < 60 -> "$minutes мин назад"
-        minutes < 1440 -> "${minutes / 60} ч назад"
-        else -> "${minutes / 1440} дн назад"
+        minutes < 1 -> tr("только что", "just now")
+        minutes < 60 -> tr("$minutes мин назад", "$minutes min ago")
+        minutes < 1440 -> tr("${minutes / 60} ч назад", "${minutes / 60} h ago")
+        else -> tr("${minutes / 1440} дн назад", "${minutes / 1440} d ago")
     }
 }

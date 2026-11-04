@@ -126,6 +126,11 @@ data class ProxyConfig(
      * inbounds — они заменяются на наш tun.
      */
     val rawConfigJson: String? = null,
+    /**
+     * Сколько прокси-выходов панель свела в этот узел балансировщиком
+     * (например, REALITY + TLS + XHTTP одной страны). 0 — обычный узел.
+     */
+    val balanced: Int = 0,
 
     /** Из какой подписки пришла нода — чтобы обновление заменяло её целиком. */
     val source: String? = null,

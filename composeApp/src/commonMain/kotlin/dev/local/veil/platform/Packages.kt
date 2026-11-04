@@ -1,5 +1,7 @@
 package dev.local.veil.platform
 
+import androidx.compose.ui.graphics.ImageBitmap
+
 /** Установленное приложение — для выбора в раздельном туннелировании. */
 data class AppEntry(
     val packageName: String,
@@ -9,4 +11,7 @@ data class AppEntry(
 
 interface PackageLister {
     suspend fun installedApps(): List<AppEntry>
+
+    /** Иконка приложения; на платформах без иконок — null (покажем букву). */
+    suspend fun icon(packageName: String): ImageBitmap? = null
 }

@@ -54,7 +54,14 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
                     throw IllegalStateException("Подписка ответила HTTP $code")
                 }
                 val body = connection.inputStream.bufferedReader().use { it.readText() }
-                SubscriptionFetch(body, parseUsage(connection.getHeaderField("subscription-userinfo")))
+                SubscriptionFetch(
+                    body = body,
+                    usage = parseUsage(connection.getHeaderField("subscription-userinfo")),
+                    title = decodeHeader(connection.getHeaderField("profile-title")),
+                    description = decodeHeader(connection.getHeaderField("announce")),
+                    supportUrl = connection.getHeaderField("support-url").orEmpty(),
+                    webUrl = connection.getHeaderField("profile-web-page-url").orEmpty(),
+                )
             } finally {
                 connection.disconnect()
             }
@@ -81,6 +88,41 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
             total = values["total"] ?: 0L,
             expireAt = values["expire"] ?: 0L,
         )
+    }
+
+    /**
+     * Панели шлют заголовки и как обычный текст, и как base64. Префикс
+     * `base64:` встречается в обоих регистрах, а полезная нагрузка бывает
+     * URL-safe и без выравнивающих символов — всё это нужно принимать.
+     */
+    private fun decodeHeader(raw: String?): String {
+        val value = raw?.trim().orEmpty()
+        if (value.isEmpty()) return ""
+        val prefix = "base64:"
+        val hasPrefix = value.startsWith(prefix, ignoreCase = true)
+        val payload = if (hasPrefix) value.substring(prefix.length).trim() else value
+        if (payload.isEmpty()) return ""
+        val decoded = runCatching {
+            val normalized = payload
+                .replace('-', '+')
+                .replace('_', '/')
+                .replace("\n", "")
+                .replace("\r", "")
+            val padded = when (normalized.length % 4) {
+                2 -> normalized + "=="
+                3 -> normalized + "="
+                0 -> normalized
+                else -> return ""
+            }
+            String(java.util.Base64.getDecoder().decode(padded), Charsets.UTF_8)
+        }.getOrNull()
+        // Если был явный префикс, но раскодировать не вышло — это не заголовок,
+        // а мусор от панели: лучше пустое значение, чем «base64:...» в списке.
+        if (decoded == null) return if (hasPrefix) "" else value
+        if (decoded.isBlank()) return if (hasPrefix) "" else value
+        val printable = decoded.count { it == '\n' || it == '\r' || it == '\t' || it.code in 32..126 || it.code > 127 }
+        if (printable != decoded.length) return if (hasPrefix) "" else value
+        return decoded
     }
 
     private companion object {

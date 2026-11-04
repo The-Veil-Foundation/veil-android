@@ -107,6 +107,16 @@ class DesktopPinger : Pinger {
                 ((System.nanoTime() - started) / 1_000_000L).toInt()
             }.getOrNull()
         }
+
+    /** isReachable шлёт ICMP, если у процесса есть права, иначе обращается к порту 7. */
+    override suspend fun icmp(server: ProxyConfig, timeoutMs: Int): Int? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val started = System.nanoTime()
+                val reachable = java.net.InetAddress.getByName(server.address).isReachable(timeoutMs)
+                if (reachable) ((System.nanoTime() - started) / 1_000_000L).toInt().coerceAtLeast(1) else null
+            }.getOrNull()
+        }
 }
 
 class DesktopLogProvider : LogProvider {
@@ -139,8 +149,18 @@ class DesktopContainer : AppContainer {
     override val update: UpdateService = DesktopUpdateService()
     override val geoDirectory: String =
         File(System.getProperty("user.home"), ".veil/geo").apply { mkdirs() }.absolutePath
+    override val geo: GeoService = DesktopGeoService()
     override val subscriptions: SubscriptionFetcher = DesktopSubscriptionFetcher()
     override val settings: SettingsStore = DesktopSettingsStore()
     override val packages: PackageLister = DesktopPackageLister()
     override val pinger: Pinger = DesktopPinger()
+}
+
+
+/** На десктопе geo-базы не используются: правила работают без них. */
+private class DesktopGeoService : GeoService {
+    override val directory: String = ""
+    override val hasAssets: Boolean = false
+    override suspend fun download(source: dev.local.veil.core.GeoAssetSource): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Geo-базы доступны только на Android"))
 }
