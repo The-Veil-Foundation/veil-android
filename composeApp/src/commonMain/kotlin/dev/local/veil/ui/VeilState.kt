@@ -10,16 +10,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.local.veil.core.AppSettings
+import dev.local.veil.core.CommunityCatalog
+import dev.local.veil.core.CommunityList
+import dev.local.veil.core.DnsSettings
+import dev.local.veil.core.GroupKind
+import dev.local.veil.core.NodeAnnotation
+import dev.local.veil.core.RoutingPreset
+import dev.local.veil.core.RoutingRule
+import dev.local.veil.core.RuleTarget
+import dev.local.veil.core.ServerGroup
 import dev.local.veil.core.ProxyConfig
 import dev.local.veil.core.SplitMode
 import dev.local.veil.core.Subscription
+import dev.local.veil.core.TunnelOptions
 import dev.local.veil.core.SubscriptionPayload
 import dev.local.veil.core.dedupKey
 import dev.local.veil.platform.AppEntry
 import dev.local.veil.platform.AppContainer
 import dev.local.veil.platform.VpnPhase
+import dev.local.veil.platform.SubscriptionFetch
 import dev.local.veil.platform.SubscriptionUsage
 import dev.local.veil.platform.VpnStatus
+import dev.local.veil.platform.deleteFile
+import dev.local.veil.platform.readTextFile
+import dev.local.veil.platform.writeTextFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -43,15 +57,51 @@ class VeilState(
     var selectedId by mutableStateOf<String?>(null)
         private set
     
+    /** Скачанные готовые списки: домены, подсети и время обновления. */
+    data class CommunityCache(
+        val domains: List<String> = emptyList(),
+        val ips: List<String> = emptyList(),
+        val updated: Long = 0L,
+    ) {
+        val isEmpty: Boolean get() = domains.isEmpty() && ips.isEmpty()
+        val entryCount: Int get() = domains.size + ips.size
+    }
+
+    var communityCache by mutableStateOf<Map<String, CommunityCache>>(emptyMap())
+        private set
+    var communityBusy by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var communityError by mutableStateOf<String?>(null)
+        private set
+
+    private val communityDirectory: String get() = "${container.geoDirectory}/community"
+
     init {
         scope.launch(Dispatchers.IO) {
+            // Не сканируем весь каталог списков при старте. На ТВ это могло
+            // прочитать десятки тысяч строк ещё до появления первого кадра.
+            val loadedSettings = container.settings.load()
             val s = container.store.load()
             val subs = container.store.loadSubscriptions()
             val sel = container.store.loadSelectedId() ?: s.firstOrNull()?.id
+            val cached = loadedSettings.communityLists.mapNotNull { id ->
+                val list = CommunityCatalog.list(id) ?: return@mapNotNull null
+                val domains = readTextFile("$communityDirectory/${list.id}.domains")
+                    ?: return@mapNotNull null
+                val ips = readTextFile("$communityDirectory/${list.id}.ips").orEmpty()
+                val updated = readTextFile("$communityDirectory/${list.id}.time")
+                    ?.trim()?.toLongOrNull() ?: 0L
+                list.id to CommunityCache(
+                    domains = domains.lineSequence().filter { it.isNotBlank() }.toList(),
+                    ips = ips.lineSequence().filter { it.isNotBlank() }.toList(),
+                    updated = updated,
+                )
+            }.toMap()
             withContext(Dispatchers.Main) {
                 servers = s
                 subscriptions = subs
                 selectedId = sel
+                communityCache = cached
             }
         }
     }
@@ -64,6 +114,8 @@ class VeilState(
         private set
     private var pingJob: Job? = null
     var pinging by mutableStateOf(false)
+    /** Узлы, которые реально замешиваются сейчас: анимация только у них. */
+    var pingingIds by mutableStateOf<Set<String>>(emptySet())
         private set
     var busy by mutableStateOf(false)
         private set
@@ -88,16 +140,47 @@ class VeilState(
         private set
     var apps by mutableStateOf<List<AppEntry>>(emptyList())
         private set
+
+    /** Загружены ли geoip.dat/geosite.dat в каталог ядра. */
+    var geoAvailable by mutableStateOf(container.geo.hasAssets)
+        private set
+    var geoBusy by mutableStateOf(false)
+        private set
     var appsLoading by mutableStateOf(false)
         private set
 
+    /** Группа, через которую подключаемся: её id лежит в selectedId. */
+    val activeGroup: ServerGroup?
+        get() = settings.groups.firstOrNull { it.id == selectedId }
+
     val selected: ProxyConfig?
-        get() = servers.firstOrNull { it.id == selectedId } ?: servers.firstOrNull()
+        get() {
+            activeGroup?.representative(servers)?.let { return it }
+            return servers.firstOrNull { it.id == selectedId } ?: servers.firstOrNull()
+        }
+
+    /** Узлы без пометки «скрыт» — их показывают списки. */
+    val visibleServers: List<ProxyConfig>
+        get() = servers.filter { settings.annotations[it.id]?.hidden != true }
+
+    /** Настройки туннеля с учётом пресета, правил, DNS и активной группы. */
+    private fun tunnelOptions(logFile: String? = null): TunnelOptions =
+        settings.copy(customRules = settings.customRules + communityRules())
+            .toTunnelOptions(logFile, servers, activeGroup)
 
     val coreAvailable: Boolean get() = container.vpn.coreAvailable
+    val deviceId: String get() = container.subscriptions.deviceId
     val coreVersion: String? get() = container.vpn.coreVersion
 
     /* ---------------- выбор и настройки ---------------- */
+
+    /** Подключение при запуске приложения, если так задано в настройках. */
+    fun autoConnectOnLaunch(status: VpnStatus) {
+        if (!settings.autoConnect) return
+        if (selected == null) return
+        if (status.phase != VpnPhase.DISCONNECTED && status.phase != VpnPhase.ERROR) return
+        connect()
+    }
 
     fun select(id: String, status: VpnStatus? = null) {
         val previous = selectedId
@@ -105,14 +188,17 @@ class VeilState(
         container.store.saveSelectedId(id)
 
         if (status?.isConnected == true && previous != id) {
-            val server = servers.firstOrNull { it.id == id } ?: return
+            val group = settings.groups.firstOrNull { it.id == id }
+            val server = group?.representative(servers)
+                ?: servers.firstOrNull { it.id == id }
+                ?: return
             if (!server.isUsable) {
-                showBulletin("Протокол ${server.proto.wire} требует sing-box", BulletinKind.ERROR)
+                showBulletin(tr("Протокол ${server.proto.wire} требует sing-box", "Protocol ${server.proto.wire} requires sing-box"), BulletinKind.ERROR)
                 return
             }
             if (switchJob?.isActive == true) return
             switchJob = scope.launch {
-                val options = settings.toTunnelOptions()
+                val options = tunnelOptions()
                 // Полная проверка идёт во втором экземпляре ядра, поэтому
                 // рабочий туннель и Телеграм не замечают её.
                 val target = pickWorkingNode(server, options)
@@ -120,7 +206,7 @@ class VeilState(
                     // Ни один узел не подтвердился — возвращаемся на прежний,
                     // чтобы не оставить пользователя с пустым туннелем.
                     val back = servers.firstOrNull { it.id == previous }
-                    showBulletin("«${server.name}» не отвечает — вернули «${back?.name ?: "прежний"}»", BulletinKind.ERROR)
+                    showBulletin(tr("«${server.name}» не отвечает — вернули «${back?.name ?: tr("прежний", "previous")}»", "“${server.name}” is not responding — reverted to “${back?.name ?: "previous"}”"), BulletinKind.ERROR)
                     if (back != null) {
                         selectedId = back.id
                         container.store.saveSelectedId(back.id)
@@ -128,10 +214,10 @@ class VeilState(
                     }
                     return@launch
                 }
-                if (target.id != server.id) {
+                if (group == null && target.id != server.id) {
                     selectedId = target.id
                     container.store.saveSelectedId(target.id)
-                    showBulletin("«${server.name}» не отвечает — переключились на «${target.name}»", BulletinKind.INFO)
+                    showBulletin(tr("«${server.name}» не отвечает — переключились на «${target.name}»", "“${server.name}” is not responding — switched to “${target.name}”"), BulletinKind.INFO)
                 }
                 container.vpn.reconnect(target, options).onFailure {
                     // Если новый узел не поднялся — возвращаемся на прежний,
@@ -141,9 +227,9 @@ class VeilState(
                         selectedId = back.id
                         container.store.saveSelectedId(back.id)
                         container.vpn.reconnect(back, options)
-                        showBulletin("«${target.name}» не поднялся — вернули «${back.name}»", BulletinKind.ERROR)
+                        showBulletin(tr("«${target.name}» не поднялся — вернули «${back.name}»", "“${target.name}” did not come up — reverted to “${back.name}”"), BulletinKind.ERROR)
                     } else {
-                        showBulletin(it.message ?: "Не удалось переключить сервер", BulletinKind.ERROR)
+                        showBulletin(it.message ?: tr("Не удалось переключить сервер", "Could not switch server"), BulletinKind.ERROR)
                     }
                 }
             }
@@ -154,6 +240,218 @@ class VeilState(
         settings = next
         container.settings.save(next)
         container.subscriptions.userAgent = next.userAgent
+    }
+
+    /* ---------------- маршрутизация, группы, заметки ---------------- */
+
+    fun saveRouting(preset: RoutingPreset, rules: List<RoutingRule>, blockAds: Boolean) {
+        saveSettings(settings.copy(routingPreset = preset, customRules = rules, blockAds = blockAds))
+    }
+
+    fun saveDns(dns: DnsSettings) {
+        saveSettings(settings.copy(dnsSettings = dns))
+    }
+
+    /** Меняет подписки местами: -1 выше, +1 ниже. */
+    fun moveSubscription(url: String, delta: Int) {
+        val list = subscriptions.toMutableList()
+        val index = list.indexOfFirst { it.url == url }
+        val target = index + delta
+        if (index < 0 || target !in list.indices) return
+        val item = list.removeAt(index)
+        list.add(target, item)
+        subscriptions = list
+        container.store.saveSubscriptions(list)
+    }
+
+    fun saveGroups(groups: List<ServerGroup>) {
+        saveSettings(settings.copy(groups = groups))
+    }
+
+    fun upsertGroup(group: ServerGroup) {
+        val next = settings.groups.toMutableList()
+        val index = next.indexOfFirst { it.id == group.id }
+        if (index >= 0) next[index] = group else next += group
+        saveGroups(next)
+    }
+
+    /** Выбирает активный узел группы ручного выбора. */
+    fun selectGroupMember(groupId: String, serverId: String) {
+        val group = settings.groups.firstOrNull { it.id == groupId } ?: return
+        if (group.kind != GroupKind.SELECTOR) return
+        upsertGroup(group.copy(selectedId = serverId))
+        if (selectedId == groupId) {
+            connect()
+        }
+    }
+
+    /** Пинг всех участников группы. */
+    fun pingGroup(group: ServerGroup) = pingTargets(group.members(servers))
+
+    fun removeGroup(id: String) {
+        saveGroups(settings.groups.filterNot { it.id == id })
+        if (selectedId == id) {
+            val fallback = servers.firstOrNull()?.id
+            selectedId = fallback
+            fallback?.let { container.store.saveSelectedId(it) }
+        }
+    }
+
+    /* ---------------- готовые списки ---------------- */
+
+    private val communityLanguage: dev.local.veil.core.AppLanguage
+        get() = when (settings.language) {
+            dev.local.veil.core.AppLanguage.SYSTEM -> systemLanguage()
+            else -> settings.language
+        }
+
+    fun communityList(id: String): CommunityList? = CommunityCatalog.list(id)
+
+    fun isCommunitySelected(id: String): Boolean = id in settings.communityLists
+
+    fun toggleCommunityList(id: String) {
+        val next = if (id in settings.communityLists) {
+            settings.communityLists - id
+        } else {
+            settings.communityLists + id
+        }
+        saveSettings(settings.copy(communityLists = next))
+        if (id in next && communityCache[id] == null) refreshCommunity(listOf(id))
+    }
+
+    fun setCommunityTarget(target: RuleTarget) {
+        saveSettings(settings.copy(communityListTarget = target))
+    }
+
+    /** Правила, в которые разворачиваются выбранные списки. */
+    fun communityRules(): List<RoutingRule> = settings.communityLists.mapNotNull { id ->
+        val list = CommunityCatalog.list(id) ?: return@mapNotNull null
+        val cache = communityCache[id] ?: return@mapNotNull null
+        if (cache.isEmpty) return@mapNotNull null
+        RoutingRule(
+            id = "community:$id",
+            name = list.title(communityLanguage),
+            target = settings.communityListTarget,
+            domains = cache.domains,
+            ips = cache.ips,
+        )
+    }
+
+    /** Обновляет выбранные списки (по умолчанию все выбранные). */
+    fun refreshCommunity(ids: List<String> = settings.communityLists) {
+        val todo = ids.filter { CommunityCatalog.list(it) != null }
+        if (todo.isEmpty() || communityBusy.isNotEmpty()) return
+        communityError = null
+        communityBusy = todo.toSet()
+        scope.launch {
+            for (id in todo) {
+                val list = CommunityCatalog.list(id) ?: continue
+                val domainsText = fetchText(CommunityCatalog.rawUrl(list.domainPath))
+                if (domainsText == null) {
+                    communityError = tr("Не удалось скачать список", "Could not download the list")
+                    continue
+                }
+                val domains = parseCommunityDomains(domainsText)
+                val ips = buildList {
+                    list.ipv4Path?.let { path ->
+                        fetchText(CommunityCatalog.rawUrl(path))?.let { addAll(parseCommunityCidrs(it)) }
+                    }
+                    list.ipv6Path?.let { path ->
+                        fetchText(CommunityCatalog.rawUrl(path))?.let { addAll(parseCommunityCidrs(it)) }
+                    }
+                }.distinct()
+                if (domains.isEmpty() && ips.isEmpty()) {
+                    communityError = tr(
+                        "Список «${list.title(communityLanguage)}» пришёл пустым",
+                        "The “${list.title(communityLanguage)}” list came back empty",
+                    )
+                    continue
+                }
+                val entry = CommunityCache(domains, ips, currentTimeMillis())
+                writeTextFile("$communityDirectory/$id.domains", domains.joinToString("\n"))
+                writeTextFile("$communityDirectory/$id.ips", ips.joinToString("\n"))
+                writeTextFile("$communityDirectory/$id.time", entry.updated.toString())
+                communityCache = communityCache + (id to entry)
+            }
+            communityBusy = emptySet()
+        }
+    }
+
+    /** Обновляет выбранные списки, если они старше суток. */
+    fun refreshCommunityDue() {
+        val stale = settings.communityLists.filter { id ->
+            val updated = communityCache[id]?.updated ?: 0L
+            currentTimeMillis() - updated > 24 * 3_600_000L
+        }
+        refreshCommunity(stale)
+    }
+
+    fun clearCommunityCache() {
+        CommunityCatalog.all.forEach { list ->
+            deleteFile("$communityDirectory/${list.id}.domains")
+            deleteFile("$communityDirectory/${list.id}.ips")
+            deleteFile("$communityDirectory/${list.id}.time")
+        }
+        communityCache = emptyMap()
+        showBulletin(
+            tr("Кэш списков очищен", "List cache cleared"),
+            BulletinKind.SUCCESS,
+        )
+    }
+
+    private suspend fun fetchText(url: String): String? = withContext(Dispatchers.IO) {
+        runCatching { container.subscriptions.fetch(url).getOrThrow().body }.getOrNull()
+    }
+
+    private fun parseCommunityDomains(text: String): List<String> = text.lineSequence()
+        .mapNotNull { raw ->
+            val value = raw.substringBefore('#').trim().trim('.').lowercase()
+            if (value.isEmpty() || value.any { it.isWhitespace() }) null else value
+        }
+        .distinct()
+        .toList()
+
+    private fun parseCommunityCidrs(text: String): List<String> = text.lineSequence()
+        .mapNotNull { raw ->
+            val value = raw.substringBefore('#').trim()
+            if (value.isEmpty()) return@mapNotNull null
+            if (value.contains('/') || value.contains(':') || value.contains('.')) value else null
+        }
+        .distinct()
+        .toList()
+
+    fun annotationFor(serverId: String): NodeAnnotation =
+        settings.annotations[serverId] ?: NodeAnnotation()
+
+    /** Имя узла с учётом пользовательской замены. */
+    fun displayName(server: ProxyConfig): String =
+        annotationFor(server.id).nameOverride.ifBlank { server.name }
+
+    fun saveAnnotation(serverId: String, annotation: NodeAnnotation) {
+        val next = settings.annotations.toMutableMap()
+        if (annotation == NodeAnnotation()) next.remove(serverId) else next[serverId] = annotation
+        saveSettings(settings.copy(annotations = next))
+    }
+
+    fun setHidden(serverId: String, hidden: Boolean) {
+        saveAnnotation(serverId, annotationFor(serverId).copy(hidden = hidden))
+    }
+
+    /** Скачивает базу правил выбранного источника. */
+    fun downloadGeo() {
+        if (geoBusy) return
+        geoBusy = true
+        scope.launch {
+            container.geo.download(settings.geoSource)
+                .onSuccess {
+                    geoAvailable = true
+                    showBulletin(tr("База правил загружена", "Rule database downloaded"), BulletinKind.SUCCESS)
+                }
+                .onFailure { error ->
+                    showBulletin(error.message ?: tr("Не удалось скачать базу правил", "Could not download the rule database"), BulletinKind.ERROR)
+                }
+            geoBusy = false
+        }
     }
 
     fun dismissBulletin(id: Long? = null) {
@@ -178,6 +476,8 @@ class VeilState(
 
     fun cancelPing() {
         pingJob?.cancel()
+        pinging = false
+        pingingIds = emptySet()
     }
 
     fun pingAll() = pingTargets(servers)
@@ -191,15 +491,16 @@ class VeilState(
         if (pinging || targets.isEmpty()) return
         val mode = pingMode
         if (mode == PingMode.REAL && !container.vpn.coreAvailable) {
-            showBulletin("Реальный пинг требует ядро Xray — выберите TCP или ICMP", BulletinKind.ERROR)
+            showBulletin(tr("Реальный пинг требует ядро Xray — выберите TCP или ICMP", "Real ping requires the Xray core — choose TCP or ICMP"), BulletinKind.ERROR)
             return
         }
         pinging = true
         // Старые цифры других групп остаются: замер идёт только по выбранным.
         val ids = targets.map { it.id }.toSet()
+        pingingIds = ids
         pings = pings.filterKeys { it !in ids }
         pingProgress = 0 to targets.size
-        val options = settings.toTunnelOptions()
+        val options = tunnelOptions()
 
         pingJob = scope.launch {
             try {
@@ -229,6 +530,7 @@ class VeilState(
                 }
             } finally {
                 pinging = false
+                pingingIds = emptySet()
             }
         }
     }
@@ -282,14 +584,14 @@ class VeilState(
         if (!container.vpn.status.value.isConnected) return
         val server = selected ?: return
         if (settings.splitMode == SplitMode.INCLUDE && settings.splitPackages.isEmpty()) {
-            showBulletin("Режим «Только»: выберите хотя бы одно приложение", BulletinKind.ERROR)
+            showBulletin(tr("Режим «Только»: выберите хотя бы одно приложение", "“Only” mode: select at least one app"), BulletinKind.ERROR)
             return
         }
         if (switchJob?.isActive == true) return
-        showBulletin("Применяем раздельный туннель…", BulletinKind.INFO)
+        showBulletin(tr("Применяем раздельный туннель…", "Applying split tunneling…"), BulletinKind.INFO)
         switchJob = scope.launch {
-            container.vpn.reconnect(server, settings.toTunnelOptions()).onFailure {
-                showBulletin(it.message ?: "Не удалось применить раздельный туннель", BulletinKind.ERROR)
+            container.vpn.reconnect(server, tunnelOptions()).onFailure {
+                showBulletin(it.message ?: tr("Не удалось применить раздельный туннель", "Could not apply split tunneling"), BulletinKind.ERROR)
             }
         }
     }
@@ -334,9 +636,9 @@ class VeilState(
     private suspend fun fetchAndAdd(url: String) {
         container.subscriptions.fetch(url)
             .onSuccess { fetched ->
-                applyBody(SubscriptionPayload.classify(fetched.body), source = url, usage = fetched.usage)
+                applyBody(SubscriptionPayload.classify(fetched.body), source = url, usage = fetched.usage, fetched = fetched)
             }
-            .onFailure { showBulletin(it.message ?: "Не удалось скачать подписку", BulletinKind.ERROR) }
+            .onFailure { showBulletin(it.message ?: tr("Не удалось скачать подписку", "Could not download the subscription"), BulletinKind.ERROR) }
     }
 
     /* ---------------- перенос между устройствами ---------------- */
@@ -373,7 +675,7 @@ class VeilState(
             }
             busy = false
             showBulletin(
-                "Получено: подписок ${payload.subscriptions.size}, новых серверов ${servers.size - before}",
+                tr("Получено: подписок ${payload.subscriptions.size}, новых серверов ${servers.size - before}", "Received: ${payload.subscriptions.size} subscriptions, ${servers.size - before} new servers"),
                 BulletinKind.SUCCESS,
             )
         }
@@ -388,7 +690,7 @@ class VeilState(
             servers = servers.filter { it.source == null }.mapNotNull { ShareLink.encode(it) },
         )
         if (payload.isEmpty) {
-            showBulletin("Нечего отправлять: добавьте подписку или сервер", BulletinKind.ERROR)
+            showBulletin(tr("Нечего отправлять: добавьте подписку или сервер", "Nothing to send: add a subscription or server"), BulletinKind.ERROR)
             return
         }
         scope.launch {
@@ -396,11 +698,11 @@ class VeilState(
             container.transfer.send(address, payload)
                 .onSuccess {
                     showBulletin(
-                        "Отправлено: подписок ${payload.subscriptions.size}, серверов ${payload.servers.size}",
+                        tr("Отправлено: подписок ${payload.subscriptions.size}, серверов ${payload.servers.size}", "Sent: ${payload.subscriptions.size} subscriptions, ${payload.servers.size} servers"),
                         BulletinKind.SUCCESS,
                     )
                 }
-                .onFailure { showBulletin(it.message ?: "Не удалось отправить", BulletinKind.ERROR) }
+                .onFailure { showBulletin(it.message ?: tr("Не удалось отправить", "Could not send"), BulletinKind.ERROR) }
             busy = false
         }
     }
@@ -422,6 +724,7 @@ class VeilState(
                         source = subscription.url,
                         replaceSource = true,
                         usage = fetched.usage,
+                        fetched = fetched,
                     )
                     subscriptions = subscriptions.map {
                         if (it.url == subscription.url) {
@@ -435,7 +738,7 @@ class VeilState(
                     }
                     container.store.saveSubscriptions(subscriptions)
                 }
-                .onFailure { showBulletin(it.message ?: "Подписка недоступна", BulletinKind.ERROR) }
+                .onFailure { showBulletin(it.message ?: tr("Подписка недоступна", "Subscription unavailable"), BulletinKind.ERROR) }
             busy = false
         }
     }
@@ -460,6 +763,7 @@ class VeilState(
         source: String?,
         replaceSource: Boolean = false,
         usage: SubscriptionUsage? = null,
+        fetched: SubscriptionFetch? = null,
     ) {
         if (body is SubscriptionPayload.Body.Failure) {
             showBulletin(body.message, BulletinKind.ERROR)
@@ -500,16 +804,24 @@ class VeilState(
 
         if (source != null) {
             val existing = subscriptions.firstOrNull { it.url == source }
+            fun clean(value: String?): String? =
+                value?.trim()?.takeIf { it.isNotBlank() && !it.startsWith("base64:", ignoreCase = true) }
             val entry = Subscription(
                 url = source,
-                // Имя подписки — её хост: панель заголовка не отдаёт,
-                // а имя первой ноды вводит в заблуждение.
-                title = source.substringAfter("://").substringBefore('/'),
+                title = clean(fetched?.title)
+                    ?: clean(existing?.title)
+                    ?: source.substringAfter("://").substringBefore('/'),
                 lastFetched = currentTimeMillis(),
                 nodeCount = next.count { it.source == source },
                 usedBytes = (usage?.used ?: existing?.usedBytes ?: 0L).takeIf { it > 0 } ?: 0L,
                 totalBytes = usage?.total ?: existing?.totalBytes ?: 0L,
                 expireAt = usage?.expireAt?.takeIf { it > 0 } ?: existing?.expireAt ?: 0L,
+                description = clean(fetched?.description)
+                    ?: clean(existing?.description).orEmpty(),
+                supportUrl = fetched?.supportUrl?.takeIf { it.isNotBlank() }
+                    ?: existing?.supportUrl.orEmpty(),
+                webUrl = fetched?.webUrl?.takeIf { it.isNotBlank() }
+                    ?: existing?.webUrl.orEmpty(),
             )
             subscriptions = subscriptions.filterNot { it.url == source } + entry
             container.store.saveSubscriptions(subscriptions)
@@ -527,9 +839,9 @@ class VeilState(
             }
             source != null -> {
                 val count = next.count { it.source == source }
-                "Подписка обновлена · $count нод"
+                tr("Подписка обновлена · $count нод", "Subscription refreshed · $count servers")
             }
-            else -> "Новых серверов нет — эти уже добавлены"
+            else -> tr("Новых серверов нет — эти уже добавлены", "No new servers — these are already added")
         }, if (source != null) BulletinKind.SUCCESS else BulletinKind.INFO)
         busy = false
     }
@@ -549,24 +861,24 @@ class VeilState(
         if (connectJob?.isActive == true) return
         val server = selected
         if (server == null) {
-            showBulletin("Сначала добавьте сервер", BulletinKind.ERROR)
+            showBulletin(tr("Сначала добавьте сервер", "Add a server first"), BulletinKind.ERROR)
             return
         }
         if (!server.isUsable) {
-            showBulletin("Протокол ${server.proto.wire} требует sing-box, а сборка на Xray", BulletinKind.ERROR)
+            showBulletin(tr("Протокол ${server.proto.wire} требует sing-box, а сборка на Xray", "Protocol ${server.proto.wire} requires sing-box, but this build uses Xray"), BulletinKind.ERROR)
             return
         }
         if (!coreAvailable) {
-            showBulletin("xray.aar не подключён к сборке", BulletinKind.ERROR)
+            showBulletin(tr("xray.aar не подключён к сборке", "xray.aar is not included in this build"), BulletinKind.ERROR)
             return
         }
         if (settings.splitMode == SplitMode.INCLUDE && settings.splitPackages.isEmpty()) {
-            showBulletin("Режим «Только»: выберите приложения в разделе «Раздельный туннель»", BulletinKind.ERROR)
+            showBulletin(tr("Режим «Только»: выберите приложения в разделе «Раздельный туннель»", "“Only” mode: choose apps in “Split tunneling”"), BulletinKind.ERROR)
             return
         }
         bulletin = null
         connectJob = scope.launch {
-            val options = settings.toTunnelOptions()
+            val options = tunnelOptions()
 
             // Сначала настоящая проверка узла: TCP-пинг показывает только
             // открытый порт, а тут проверяется и рукопожатие, и авторизация.
@@ -576,18 +888,18 @@ class VeilState(
                 // Проверка — эвристика: на мобильных сетях она может не пройти
                 // из-за самого оператора. Поэтому не запрещаем подключение,
                 // но предупреждаем, что узел не подтвердился.
-                showBulletin("Узлы не ответили на проверку — пробуем «${server.name}»", BulletinKind.INFO)
+                showBulletin(tr("Узлы не ответили на проверку — пробуем «${server.name}»", "No servers responded — trying “${server.name}”"), BulletinKind.INFO)
             }
 
             val target = picked ?: server
             if (target.id != server.id) {
                 selectedId = target.id
                 container.store.saveSelectedId(target.id)
-                showBulletin("«${server.name}» не отвечает — подключились к «${target.name}»", BulletinKind.INFO)
+                showBulletin(tr("«${server.name}» не отвечает — подключились к «${target.name}»", "“${server.name}” is not responding — connected to “${target.name}”"), BulletinKind.INFO)
             }
 
             container.vpn.connect(target, options).onFailure {
-                showBulletin(it.message ?: "Не удалось подключиться", BulletinKind.ERROR)
+                showBulletin(it.message ?: tr("Не удалось подключиться", "Could not connect"), BulletinKind.ERROR)
             }
         }
     }
@@ -628,7 +940,7 @@ class VeilState(
     fun checkConnection() {
         val server = selected
         if (server == null) {
-            showBulletin("Сначала выберите сервер", BulletinKind.ERROR)
+            showBulletin(tr("Сначала выберите сервер", "Select a server first"), BulletinKind.ERROR)
             return
         }
         scope.launch {
@@ -639,7 +951,7 @@ class VeilState(
             try {
                 tcp = withContext(Dispatchers.IO) { container.pinger.ping(server, timeoutMs = 4000) }
                 real = if (container.vpn.coreAvailable) {
-                    container.vpn.realPing(server, settings.toTunnelOptions(), timeoutMs = 6000)
+                    container.vpn.realPing(server, tunnelOptions(), timeoutMs = 6000)
                 } else {
                     null
                 }
@@ -650,19 +962,19 @@ class VeilState(
             when {
                 real != null -> {
                     if (pingMode == PingMode.REAL) pings = pings + (server.id to real)
-                    val tcpPart = tcp?.let { " · TCP $it мс" }.orEmpty()
-                    showBulletin("«${server.name}» отвечает · реальный $real мс$tcpPart", BulletinKind.SUCCESS)
+                    val tcpPart = tcp?.let { tr(" · TCP $it мс", " · TCP $it ms") }.orEmpty()
+                    showBulletin(tr("«${server.name}» отвечает · реальный $real мс$tcpPart", "“${server.name}” responds · real $real ms$tcpPart"), BulletinKind.SUCCESS)
                 }
                 tcp != null -> {
                     if (pingMode == PingMode.TCP) pings = pings + (server.id to tcp)
                     val note = if (container.vpn.coreAvailable) {
-                        "порт открыт ($tcp мс), но через узел трафик не идёт"
+                        tr("порт открыт ($tcp мс), но через узел трафик не идёт", "port is open ($tcp ms), but traffic does not pass through the server")
                     } else {
-                        "порт открыт · TCP $tcp мс"
+                        tr("порт открыт · TCP $tcp мс", "port open · TCP $tcp ms")
                     }
                     showBulletin("«${server.name}»: $note", if (container.vpn.coreAvailable) BulletinKind.ERROR else BulletinKind.SUCCESS)
                 }
-                else -> showBulletin("«${server.name}» не отвечает", BulletinKind.ERROR)
+                else -> showBulletin(tr("«${server.name}» не отвечает", "“${server.name}” is not responding"), BulletinKind.ERROR)
             }
         }
     }
@@ -675,13 +987,13 @@ class VeilState(
             container.update.latest()
                 .onSuccess { release ->
                     if (release == null) {
-                        showBulletin("Обновлений нет · версия ${appVersion}", BulletinKind.SUCCESS)
+                        showBulletin(tr("Обновлений нет · версия ${appVersion}", "No updates · version ${appVersion}"), BulletinKind.SUCCESS)
                     } else {
                         update = release
                     }
                 }
                 .onFailure {
-                    val text = it.message ?: "Не удалось проверить обновления"
+                    val text = it.message ?: tr("Не удалось проверить обновления", "Could not check for updates")
                     // Отсутствие релизов — не ошибка, а факт.
                     val kind = if (text.contains("Релизов")) BulletinKind.INFO else BulletinKind.ERROR
                     showBulletin(text, kind)
@@ -700,12 +1012,12 @@ class VeilState(
                     updateProgress = null
                     update = null
                     container.update.install(path)
-                        .onSuccess { showBulletin("Открываю установщик Android", BulletinKind.INFO) }
-                        .onFailure { showBulletin(it.message ?: "Не удалось запустить установку", BulletinKind.ERROR) }
+                        .onSuccess { showBulletin(tr("Открываю установщик Android", "Opening the Android installer"), BulletinKind.INFO) }
+                        .onFailure { showBulletin(it.message ?: tr("Не удалось запустить установку", "Could not start the installation"), BulletinKind.ERROR) }
                 }
                 .onFailure {
                     updateProgress = null
-                    showBulletin(it.message ?: "Не удалось скачать обновление", BulletinKind.ERROR)
+                    showBulletin(it.message ?: tr("Не удалось скачать обновление", "Could not download the update"), BulletinKind.ERROR)
                 }
         }
     }

@@ -149,8 +149,18 @@ class DesktopContainer : AppContainer {
     override val update: UpdateService = DesktopUpdateService()
     override val geoDirectory: String =
         File(System.getProperty("user.home"), ".veil/geo").apply { mkdirs() }.absolutePath
+    override val geo: GeoService = DesktopGeoService()
     override val subscriptions: SubscriptionFetcher = DesktopSubscriptionFetcher()
     override val settings: SettingsStore = DesktopSettingsStore()
     override val packages: PackageLister = DesktopPackageLister()
     override val pinger: Pinger = DesktopPinger()
+}
+
+
+/** На десктопе geo-базы не используются: правила работают без них. */
+private class DesktopGeoService : GeoService {
+    override val directory: String = ""
+    override val hasAssets: Boolean = false
+    override suspend fun download(source: dev.local.veil.core.GeoAssetSource): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Geo-базы доступны только на Android"))
 }

@@ -8,9 +8,11 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import dev.local.veil.core.AppStyle
 import androidx.compose.ui.unit.dp
 
 /**
@@ -43,27 +45,36 @@ private val FallbackLight = lightColorScheme(
     outlineVariant = Color(0xFFCAC4D0),
 )
 
+/**
+ * Тёмная палитра в духе ночных настроек One UI: глубокий сине-серый фон,
+ * карточки на тон светлее и спокойный голубой акцент. В отличие от
+ * фиолетового M3 по умолчанию, такой интерфейс меньше «светится» ночью.
+ */
 private val FallbackDark = darkColorScheme(
-    primary = Color(0xFFCFBCFF),
-    onPrimary = Color(0xFF381E72),
-    primaryContainer = Color(0xFF4F378B),
-    onPrimaryContainer = Color(0xFFE9DDFF),
-    secondaryContainer = Color(0xFF4A4458),
-    onSecondaryContainer = Color(0xFFE8DEF8),
-    tertiaryContainer = Color(0xFF633B48),
-    onTertiaryContainer = Color(0xFFFFD8E4),
-    background = Color(0xFF141218),
-    onBackground = Color(0xFFE6E0E9),
-    surface = Color(0xFF141218),
-    onSurface = Color(0xFFE6E0E9),
-    surfaceVariant = Color(0xFF49454F),
-    onSurfaceVariant = Color(0xFFCAC4D0),
-    surfaceContainerLow = Color(0xFF1D1B20),
-    surfaceContainer = Color(0xFF211F26),
-    surfaceContainerHigh = Color(0xFF2B292F),
-    surfaceContainerHighest = Color(0xFF36343B),
-    outline = Color(0xFF938F99),
-    outlineVariant = Color(0xFF49454F),
+    primary = Color(0xFFA9C7FF),
+    onPrimary = Color(0xFF0B2B52),
+    primaryContainer = Color(0xFF23446F),
+    onPrimaryContainer = Color(0xFFD7E4FF),
+    secondary = Color(0xFFB9C8DA),
+    onSecondary = Color(0xFF233240),
+    secondaryContainer = Color(0xFF233240),
+    onSecondaryContainer = Color(0xFFD5E3F5),
+    tertiary = Color(0xFF9FD0C9),
+    tertiaryContainer = Color(0xFF1F4441),
+    onTertiaryContainer = Color(0xFFC3EFE8),
+    background = Color(0xFF0B1118),
+    onBackground = Color(0xFFE6EDF5),
+    surface = Color(0xFF0B1118),
+    onSurface = Color(0xFFE6EDF5),
+    surfaceVariant = Color(0xFF2A3542),
+    onSurfaceVariant = Color(0xFFA9B7C6),
+    surfaceContainerLowest = Color(0xFF070C12),
+    surfaceContainerLow = Color(0xFF111923),
+    surfaceContainer = Color(0xFF141D28),
+    surfaceContainerHigh = Color(0xFF18222E),
+    surfaceContainerHighest = Color(0xFF1E2A38),
+    outline = Color(0xFF7C8B9C),
+    outlineVariant = Color(0xFF2A3644),
 )
 
 /**
@@ -82,6 +93,12 @@ private fun pitchBlackScheme(base: ColorScheme): ColorScheme = base.copy(
     surfaceContainerHighest = Color(0xFF1A181F),
     outlineVariant = Color(0xFF26232D),
 )
+
+/**
+ * Режим разметки. iOS-лэйаут включён, но сами компоненты остаются
+ * Material 3 Expressive: цвета, формы и контролы берутся из темы.
+ */
+val LocalAppStyle = staticCompositionLocalOf { AppStyle.IOS }
 
 @Composable
 fun OrbitTheme(
@@ -103,11 +120,11 @@ fun OrbitTheme(
 
 /** Материаловские скругления из редизайна: крупные радиусы, мягкие формы. */
 internal fun orbitShapes() = Shapes(
-    extraSmall = RoundedCornerShape(10.dp),
-    small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(24.dp),
-    large = RoundedCornerShape(32.dp),
-    extraLarge = RoundedCornerShape(44.dp),
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(28.dp),
+    extraLarge = RoundedCornerShape(36.dp),
 )
 
 /**

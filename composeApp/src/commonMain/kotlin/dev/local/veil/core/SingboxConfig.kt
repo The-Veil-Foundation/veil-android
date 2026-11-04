@@ -30,27 +30,55 @@ object SingboxConfig {
         options: TunnelOptions = TunnelOptions(),
         inbound: Inbound = Inbound.Tun(options.inboundName, options.mtu),
     ): JsonObject {
+        val dnsSettings = options.dnsSettings?.takeIf { it.enabled }?.sanitized()
+        val balancer = options.balancerMembers
+        val useBalancer = balancer.size > 1
+
         return buildJsonObject {
             put("log", logJson(options))
 
             putJsonObject("dns") {
-                putJsonArray("servers") {
-                    options.dnsServers.forEach { dns ->
-                        addJsonObject {
-                            put("tag", "dns-$dns")
-                            put("address", dns)
+                if (dnsSettings != null) {
+                    putJsonArray("servers") {
+                        dnsSettings.servers.forEach { entry ->
+                            addJsonObject {
+                                put("type", entry.kind.name.lowercase())
+                                put("tag", entry.tag)
+                                if (entry.kind.needsServer) {
+                                    put("server", entry.server)
+                                    entry.port?.let { put("server_port", it) }
+                                    if (entry.kind.needsPath && entry.path.isNotBlank()) put("path", entry.path)
+                                }
+                                if (entry.detour.isNotBlank() && entry.detour != TAG_DIRECT) {
+                                    put("detour", entry.detour)
+                                }
+                                if (entry.strategy.isNotBlank()) put("strategy", entry.strategy)
+                            }
                         }
                     }
-                }
-                putJsonArray("rules") {
-                    addJsonObject {
-                        putJsonArray("geosite") {
-                            add("category-ads-all")
+                    putJsonArray("rules") {
+                        dnsSettings.rules.filter { it.enabled && it.hasMatcher }.forEach { rule ->
+                            addJsonObject {
+                                putJsonArray("domain") { rule.domains.forEach { add(it) } }
+                                put("server", if (rule.reject) TAG_BLOCK else rule.serverTag)
+                            }
                         }
-                        put("server", "block")
                     }
+                    put("final", dnsSettings.finalTag)
+                    put("strategy", dnsSettings.strategy)
+                    put("reverse_mapping", dnsSettings.reverseMapping)
+                } else {
+                    putJsonArray("servers") {
+                        options.dnsServers.forEach { dns ->
+                            addJsonObject {
+                                put("type", "udp")
+                                put("tag", "dns-$dns")
+                                put("server", dns)
+                            }
+                        }
+                    }
+                    put("strategy", if (options.ipv6) "prefer_ipv4" else "ipv4_only")
                 }
-                put("strategy", if (options.ipv6) "prefer_ipv4" else "ipv4_only")
             }
 
             putJsonArray("inbounds") {
@@ -86,7 +114,19 @@ object SingboxConfig {
             }
 
             putJsonArray("outbounds") {
-                add(outbound(cfg, TAG_PROXY))
+                if (useBalancer) {
+                    balancer.forEachIndexed { index, member -> add(outbound(member, "bal-$index")) }
+                    addJsonObject {
+                        put("type", "urltest")
+                        put("tag", TAG_PROXY)
+                        putJsonArray("outbounds") { balancer.indices.forEach { add("bal-$it") } }
+                        put("url", "https://www.gstatic.com/generate_204")
+                        put("interval", "3m")
+                        put("tolerance", 50)
+                    }
+                } else {
+                    add(outbound(cfg, TAG_PROXY))
+                }
                 addJsonObject {
                     put("type", "direct")
                     put("tag", TAG_DIRECT)
@@ -108,6 +148,9 @@ object SingboxConfig {
                         put("protocol", "dns")
                         put("outbound", TAG_DNS_OUT)
                     }
+
+                    // Пользовательские и пресетные правила — раньше общих.
+                    options.rules.forEach { rule -> rule.singboxRule()?.let { add(it) } }
 
                     // Private networks
                     addJsonObject {

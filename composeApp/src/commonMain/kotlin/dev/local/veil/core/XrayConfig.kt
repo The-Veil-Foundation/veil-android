@@ -37,6 +37,13 @@ data class TunnelOptions(
     val bypassRu: Boolean = false,
     /** Какое ядро запускать: AUTO выбирает по протоколу узла. */
     val coreEngine: CoreEngine = CoreEngine.AUTO,
+    /** Правила маршрутизации: пресет + пользовательские. */
+    val rules: List<RoutingRule> = emptyList(),
+    val blockAds: Boolean = false,
+    /** Полные настройки DNS (null — использовать legacy [dnsServers]). */
+    val dnsSettings: DnsSettings? = null,
+    /** Участники группы «самый быстрый»: строим leastPing-балансировщик. */
+    val balancerMembers: List<ProxyConfig> = emptyList(),
     /**
      * Есть ли в каталоге ядра geoip.dat и geosite.dat. Без них правило с
      * `geoip:`/`geosite:` не просто не сработает — ядро откажется стартовать
@@ -71,14 +78,23 @@ object XrayConfig {
             if (doc != null) return patchRaw(doc, options, inbound)
         }
 
-        val hasDns = options.dnsServers.isNotEmpty()
+        val dnsSettings = options.dnsSettings?.takeIf { it.enabled }
+        val hasDns = dnsSettings?.servers?.isNotEmpty() ?: options.dnsServers.isNotEmpty()
+        val balancer = options.balancerMembers.filter { it.xrayCompatible }
+        val useBalancer = balancer.size > 1
 
         return buildJsonObject {
             put("log", logJson(options))
             put("inbounds", JsonArray(inboundList(inbound)))
 
             putJsonArray("outbounds") {
-                add(outbound(cfg, TAG_PROXY, options))
+                if (useBalancer) {
+                    balancer.forEachIndexed { index, member ->
+                        add(outbound(member, "bal-$index", options))
+                    }
+                } else {
+                    add(outbound(cfg, TAG_PROXY, options))
+                }
                 addJsonObject { put("tag", TAG_DIRECT); put("protocol", "freedom"); put("settings", JsonObject(emptyMap())) }
                 addJsonObject { put("tag", TAG_BLOCK); put("protocol", "blackhole"); put("settings", JsonObject(emptyMap())) }
                 if (hasDns) {
@@ -96,6 +112,15 @@ object XrayConfig {
                             put("outboundTag", TAG_DNS_OUT)
                         }
                     }
+                    // Пользовательские и пресетные правила — раньше общих.
+                    options.rules.forEach { rule -> rule.xrayRule()?.let { add(it) } }
+                    if (options.blockAds && options.geoAvailable) {
+                        addJsonObject {
+                            put("type", "field")
+                            putJsonArray("domain") { add("geosite:category-ads-all") }
+                            put("outboundTag", TAG_BLOCK)
+                        }
+                    }
                     // Приватные диапазоны перечислены явно: geoip.dat в APK нет,
                     // а `geoip:private` без него роняет весь конфиг.
                     addJsonObject {
@@ -104,8 +129,6 @@ object XrayConfig {
                         put("outboundTag", TAG_DIRECT)
                     }
                     if (options.bypassRu) {
-                        // Домены .ru/.su/.рф идут напрямую: без geo-баз,
-                        // чтобы конфиг не падал на отсутствующем geosite.dat.
                         addJsonObject {
                             put("type", "field")
                             putJsonArray("domain") {
@@ -119,14 +142,42 @@ object XrayConfig {
                     addJsonObject {
                         put("type", "field")
                         put("network", "tcp,udp")
-                        put("outboundTag", TAG_PROXY)
+                        if (useBalancer) put("balancerTag", TAG_PROXY) else put("outboundTag", TAG_PROXY)
                     }
+                }
+                if (useBalancer) {
+                    putJsonArray("balancers") {
+                        addJsonObject {
+                            put("tag", TAG_PROXY)
+                            putJsonArray("selector") { balancer.indices.forEach { add("bal-$it") } }
+                            put("strategy", "leastPing")
+                        }
+                    }
+                }
+            }
+
+            if (useBalancer) {
+                putJsonObject("observatory") {
+                    putJsonArray("subjectSelector") { balancer.indices.forEach { add("bal-$it") } }
+                    put("probeUrl", "https://www.gstatic.com/generate_204")
+                    put("probeInterval", "1m")
+                    put("enableConcurrency", true)
                 }
             }
 
             if (hasDns) {
                 putJsonObject("dns") {
-                    putJsonArray("servers") { options.dnsServers.forEach { add(it) } }
+                    if (dnsSettings != null) {
+                        val clean = dnsSettings.sanitized()
+                        putJsonArray("servers") {
+                            clean.servers.forEach { entry ->
+                                val host = if (entry.port != null) "${entry.server}:${entry.port}" else entry.server
+                                add(entry.kind.address(host))
+                            }
+                        }
+                    } else {
+                        putJsonArray("servers") { options.dnsServers.forEach { add(it) } }
+                    }
                     put("queryStrategy", if (options.ipv6) "UseIP" else "UseIPv4")
                 }
             }

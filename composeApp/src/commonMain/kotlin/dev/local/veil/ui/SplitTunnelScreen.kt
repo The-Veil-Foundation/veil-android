@@ -115,10 +115,10 @@ fun SplitTunnelScreen(
             InfoCard(
                 icon = if (warn) AppIcons.Danger else AppIcons.Info,
                 text = when {
-                    warn -> "Отметьте хотя бы одно приложение — иначе в туннель нечего пускать."
-                    settings.splitMode == SplitMode.OFF -> "Весь трафик идёт через VPN. Выберите «Кроме» или «Только», чтобы отметить приложения."
-                    settings.splitMode == SplitMode.EXCLUDE -> "Отмеченные приложения пойдут мимо туннеля."
-                    else -> "Через туннель пойдут только отмеченные приложения. Остальные — напрямую."
+                    warn -> tr("Отметьте хотя бы одно приложение — иначе в туннель нечего пускать.", "Select at least one app — otherwise nothing will go through the tunnel.")
+                    settings.splitMode == SplitMode.OFF -> tr("Весь трафик идёт через VPN. Выберите «Кроме» или «Только», чтобы отметить приложения.", "All traffic goes through the VPN. Choose “Except” or “Only” to select apps.")
+                    settings.splitMode == SplitMode.EXCLUDE -> tr("Отмеченные приложения пойдут мимо туннеля.", "Selected apps will bypass the tunnel.")
+                    else -> tr("Через туннель пойдут только отмеченные приложения. Остальные — напрямую.", "Only selected apps will go through the tunnel. The rest go direct.")
                 },
                 warning = warn,
             )
@@ -131,7 +131,7 @@ fun SplitTunnelScreen(
                 onValueChange = { query = it },
                 singleLine = true,
                 shape = RoundedCornerShape(999.dp),
-                placeholder = { Text("Поиск приложения") },
+                placeholder = { Text(tr("Поиск приложения", "Search apps")) },
                 leadingIcon = { AppIcon(AppIcons.Search) },
                 trailingIcon = {
                     AnimatedVisibility(
@@ -140,7 +140,7 @@ fun SplitTunnelScreen(
                         exit = scaleOut() + fadeOut(),
                     ) {
                         IconButton(onClick = { query = "" }) {
-                            AppIcon(AppIcons.Close, contentDescription = "Очистить")
+                            AppIcon(AppIcons.Close, contentDescription = tr("Очистить", "Clear"))
                         }
                     }
                 },
@@ -163,7 +163,7 @@ fun SplitTunnelScreen(
                 FilterChip(
                     selected = showSystem,
                     onClick = { showSystem = !showSystem },
-                    label = { Text("Системные") },
+                    label = { Text(tr("Системные", "System")) },
                     shape = RoundedCornerShape(12.dp),
                 )
                 AnimatedContent(
@@ -177,7 +177,7 @@ fun SplitTunnelScreen(
                     label = "count",
                 ) { count ->
                     Text(
-                        text = "Выбрано: $count",
+                        text = tr("Выбрано: $count", "Selected: $count"),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -187,7 +187,7 @@ fun SplitTunnelScreen(
                     enter = scaleIn(tween(180)) + fadeIn(),
                     exit = scaleOut() + fadeOut(),
                 ) {
-                    TextButton(onClick = state::clearSplitPackages) { Text("Сбросить") }
+                    TextButton(onClick = state::clearSplitPackages) { Text(tr("Сбросить", "Reset")) }
                 }
             }
         }
@@ -201,7 +201,7 @@ fun SplitTunnelScreen(
         } else if (filtered.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    text = if (state.apps.isEmpty()) "Список приложений недоступен" else "Ничего не найдено",
+                    text = if (state.apps.isEmpty()) tr("Список приложений недоступен", "App list unavailable") else tr("Ничего не найдено", "Nothing found"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -254,7 +254,7 @@ fun SplitTunnelScreen(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = if (app.isSystem) "${app.packageName} · системное" else app.packageName,
+                                text = if (app.isSystem) tr("${app.packageName} · системное", "${app.packageName} · system") else app.packageName,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -272,9 +272,9 @@ fun SplitTunnelScreen(
 private data class ModeItem(val mode: SplitMode, val title: String, val subtitle: String, val icon: ImageVector)
 
 private val modeItems = listOf(
-    ModeItem(SplitMode.OFF, "Выкл", "Всё в VPN", AppIcons.Global),
-    ModeItem(SplitMode.EXCLUDE, "Кроме", "Мимо VPN", AppIcons.Block),
-    ModeItem(SplitMode.INCLUDE, "Только", "Только в VPN", AppIcons.Check),
+    ModeItem(SplitMode.OFF, tr("Выкл", "Off"), tr("Всё в VPN", "All in VPN"), AppIcons.Global),
+    ModeItem(SplitMode.EXCLUDE, tr("Кроме", "Except"), tr("Мимо VPN", "Bypass VPN"), AppIcons.Block),
+    ModeItem(SplitMode.INCLUDE, tr("Только", "Only"), tr("Только в VPN", "Only in VPN"), AppIcons.Check),
 )
 
 /** Выбранная кнопка расширяется и округляется пружинно (Expressive). */

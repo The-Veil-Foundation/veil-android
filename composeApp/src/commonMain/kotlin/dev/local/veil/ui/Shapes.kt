@@ -11,6 +11,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -60,6 +61,26 @@ private const val SNAP_MS = 420          // длительность рывка 
 private const val HOLD_MS = 360L         // замирание между рывками
 private const val ROTATION_STEP = 90f    // фиксированный угол рывка поворота
 
+/**
+ * Шкала форм M3 Expressive: крупные скругления для карточек и листов,
+ * малые — для внутренних сегментов. Значения синхронизированы с темой.
+ */
+object Md3Shapes {
+    val xs = 8.dp
+    val sm = 12.dp
+    val md = 18.dp
+    val lg = 28.dp
+    val xl = 36.dp
+
+    val card = RoundedCornerShape(lg)
+    val cardLarge = RoundedCornerShape(xl)
+    val segmentOuter = RoundedCornerShape(lg)
+    val segmentInner = RoundedCornerShape(10.dp)
+    val sheet = RoundedCornerShape(topStart = xl, topEnd = xl)
+    val dialog = RoundedCornerShape(lg)
+    val pill = RoundedCornerShape(percent = 50)
+}
+
 /** Набор Expressive-форм (RoundedPolygon). */
 object MaterialShapePresets {
     val Circle = RoundedPolygon.circle(numVertices = 16)
@@ -70,6 +91,11 @@ object MaterialShapePresets {
     val Sunny = RoundedPolygon(8, rounding = CornerRounding(0.35f))
     val Cookie = RoundedPolygon(9, rounding = CornerRounding(0.5f))
     val Scallop = RoundedPolygon(12, rounding = CornerRounding(0.35f))
+    val SoftSquare = RoundedPolygon(4, rounding = CornerRounding(0.5f))
+    val Burst = RoundedPolygon(12, rounding = CornerRounding(0.18f))
+    val Diamond = RoundedPolygon(4, rounding = CornerRounding(0.25f)).also {
+        // Поворот на 45° задаётся при морфинге через CubicsShape.
+    }
 }
 
 /** Записывает замкнутый контур из кубиков Безье в [path]. */
@@ -142,6 +168,12 @@ fun ExpressiveLoader(
     diameter: Dp = 24.dp,
     color: Color = MaterialTheme.colorScheme.primary,
 ) {
+    if (LocalTvMode.current) {
+        Canvas(modifier = modifier.size(diameter)) {
+            drawCircle(color = color, radius = size.minDimension / 2f)
+        }
+        return
+    }
     val sequence = remember {
         listOf(
             MaterialShapePresets.SoftTriangle,
@@ -212,6 +244,22 @@ fun CookieBadge(
     spinning: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    if (LocalTvMode.current || !spinning) {
+        Box(modifier.size(diameter), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.matchParentSize()) {
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val s = min(size.width, size.height) / 2f
+                translate(left = cx, top = cy) {
+                    scale(scale = s, pivot = Offset.Zero) {
+                        drawPath(cookiePathForBadge(), color)
+                    }
+                }
+            }
+            content()
+        }
+        return
+    }
     val spin = rememberInfiniteTransition(label = "cookie")
     val rotation by spin.animateFloat(
         initialValue = 0f,
@@ -237,6 +285,9 @@ fun CookieBadge(
         content()
     }
 }
+
+private fun cookiePathForBadge(): Path =
+    Path().also { writeCubics(it, MaterialShapePresets.Cookie.cubics) }
 
 /**
  * Спиннер на экране подключения: прерывистый морфинг форм (треугольник →

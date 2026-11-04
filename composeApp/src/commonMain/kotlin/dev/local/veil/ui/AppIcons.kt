@@ -22,13 +22,17 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Inventory2
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
@@ -37,6 +41,9 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.GppBad
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
@@ -61,17 +68,22 @@ object AppIcons {
     val Server = Icons.Rounded.Dns
     val ServerAlt = Icons.Rounded.Storage
     val Cloud = Icons.Rounded.CloudSync
+    val Layers = Icons.Rounded.Layers
     val Routing = Icons.Rounded.AltRoute
     val Structure = Icons.Rounded.AccountTree
     val Settings = Icons.Rounded.Settings
     val Tuning = Icons.Rounded.Tune
     val Shield = Icons.Rounded.Shield
+    val ShieldOff = Icons.Rounded.GppBad
+    val Up = Icons.Rounded.ArrowUpward
+    val Down = Icons.Rounded.ArrowDownward
     val ShieldCheck = Icons.Rounded.VerifiedUser
     val Qr = Icons.Rounded.QrCode2
     val Eye = Icons.Rounded.Visibility
     val EyeOff = Icons.Rounded.VisibilityOff
     val Incognito = Icons.Rounded.Security
     val Bell = Icons.Rounded.NotificationsActive
+    val Note = Icons.Rounded.EditNote
     val Refresh = Icons.Rounded.Refresh
     val ChevronRight = Icons.Rounded.ChevronRight
     val ChevronDown = Icons.Rounded.ExpandMore
@@ -99,7 +111,9 @@ object AppIcons {
     val Pause = Icons.Rounded.Pause
     val Play = Icons.Rounded.PlayArrow
     val Global = Icons.Rounded.Public
+    val Pin = Icons.Rounded.PushPin
     val More = Icons.Rounded.MoreVert
+    val MoreHorizontal = Icons.Rounded.MoreHoriz
     val Bolt = Icons.Rounded.Bolt
     val Block = Icons.Rounded.Block
     val Search = Icons.Rounded.Search

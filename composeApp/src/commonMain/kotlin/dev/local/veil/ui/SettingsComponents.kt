@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -79,7 +80,24 @@ internal fun SettingsGroup(
             )
         }
 
-        SegmentedGroup(rows = rows)
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                rows.forEachIndexed { index, row ->
+                    row()
+                    if (index != rows.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -95,8 +113,8 @@ internal fun SegmentedGroup(
 ) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         rows.forEachIndexed { index, row ->
-            val top = if (index == 0) 24.dp else 6.dp
-            val bottom = if (index == rows.lastIndex) 24.dp else 6.dp
+            val top = if (index == 0) Md3Shapes.lg else Md3Shapes.xs
+            val bottom = if (index == rows.lastIndex) Md3Shapes.lg else Md3Shapes.xs
             Surface(
                 shape = RoundedCornerShape(
                     topStart = top,
@@ -144,8 +162,9 @@ internal fun SegmentAction(
     subtitle: String? = null,
     onClick: () -> Unit,
     icon: ImageVector? = null,
+    enabled: Boolean = true,
 ) {
-    SegmentRow(onClick = onClick) {
+    SegmentRow(onClick = if (enabled) onClick else null) {
         icon?.let { SegmentIcon(it) }
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -282,7 +301,10 @@ private fun SegmentIcon(icon: ImageVector) {
     Box(
         Modifier
             .size(36.dp)
-            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+            .background(
+                MaterialTheme.colorScheme.secondaryContainer,
+                RoundedCornerShape(Md3Shapes.sm),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         AppIcon(

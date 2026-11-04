@@ -50,6 +50,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -58,36 +60,60 @@ import dev.local.veil.platform.VpnPhase
 import dev.local.veil.platform.VpnStatus
 import kotlinx.coroutines.delay
 
-/** Логотип: монета с буквой V. */
+/**
+ * Логотип Veil — открытый защитный контур из Figma.
+ * Цвета берутся из темы, поэтому знак подстраивается под системную палитру.
+ */
 @Composable
-fun VeilMark(size: androidx.compose.ui.unit.Dp = 36.dp, modifier: Modifier = Modifier) {
-    val primary = MaterialTheme.colorScheme.primary
-    val onPrimary = MaterialTheme.colorScheme.onPrimary
+fun VeilMark(
+    size: androidx.compose.ui.unit.Dp = 36.dp,
+    modifier: Modifier = Modifier,
+    background: Color = Color(0xFFDCE8D5),
+    foreground: Color = Color(0xFF304E40),
+) {
     Canvas(modifier.size(size)) {
-        val radius = this.size.minDimension / 2f
-        drawCircle(color = primary, radius = radius)
-        drawCircle(
-            color = onPrimary.copy(alpha = 0.35f),
-            radius = radius - radius * 0.09f,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = radius * 0.06f),
-        )
-        val w = radius * 0.46f
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(center.x - w * 0.85f, center.y - w * 0.6f)
-            lineTo(center.x, center.y + w * 0.75f)
-            lineTo(center.x + w * 0.85f, center.y - w * 0.6f)
+        drawCircle(color = background, radius = this.size.minDimension / 2f)
+        val s = this.size.minDimension / 192f
+        val offset = (this.size.minDimension - 132.5f * s) / 2f
+        translate(left = offset, top = offset) {
+            scale(
+                scale = s,
+                pivot = androidx.compose.ui.geometry.Offset.Zero,
+            ) {
+                drawPath(leftShieldPath(), foreground)
+                drawPath(rightShieldPath(), foreground)
+            }
         }
-        drawPath(
-            path = path,
-            color = onPrimary,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = radius * 0.2f,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round,
-            ),
-        )
     }
 }
+
+private fun leftShieldPath(): androidx.compose.ui.graphics.Path =
+    androidx.compose.ui.graphics.Path().apply {
+        moveTo(71.55f, 14.575f)
+        lineTo(21.2f, 31.8f)
+        lineTo(21.2f, 64.925f)
+        cubicTo(21.2f, 88.775f, 34.45f, 106f, 53f, 116.6f)
+        lineTo(60.95f, 98.05f)
+        cubicTo(47.7f, 90.1f, 39.75f, 79.5f, 39.75f, 63.6f)
+        lineTo(39.75f, 45.05f)
+        lineTo(64.925f, 35.775f)
+        lineTo(71.55f, 14.575f)
+        close()
+    }
+
+private fun rightShieldPath(): androidx.compose.ui.graphics.Path =
+    androidx.compose.ui.graphics.Path().apply {
+        moveTo(86.125f, 19.875f)
+        lineTo(111.3f, 29.15f)
+        lineTo(111.3f, 63.6f)
+        cubicTo(111.3f, 87.45f, 98.05f, 106f, 70.225f, 120.575f)
+        lineTo(78.175f, 94.075f)
+        cubicTo(87.45f, 84.8f, 92.75f, 74.2f, 92.75f, 62.275f)
+        lineTo(92.75f, 43.725f)
+        lineTo(79.5f, 38.425f)
+        lineTo(86.125f, 19.875f)
+        close()
+    }
 
 /** Крупная статус-карточка: состояние, трафик, таймер, кнопка. */
 @Composable
@@ -128,12 +154,12 @@ fun StatusCard(
 
     // Экспрессивная форма: карточка «раскрывается» при подключении, быстро.
     val big by animateFloatAsState(
-        targetValue = if (connected) 52f else 32f,
+        targetValue = if (connected) 44f else 32f,
         animationSpec = tween(180),
         label = "status-corner",
     )
     val small by animateFloatAsState(
-        targetValue = if (connected) 22f else 32f,
+        targetValue = if (connected) 24f else 32f,
         animationSpec = tween(180),
         label = "status-corner-small",
     )
@@ -161,12 +187,12 @@ fun StatusCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = when {
-                        checking -> "Проверяем сервер…"
-                        status.phase == VpnPhase.CONNECTED -> "Защищено"
-                        status.phase == VpnPhase.PAUSED -> "Пауза"
-                        status.phase == VpnPhase.CONNECTING -> "Подключаем…"
-                        status.phase == VpnPhase.ERROR -> "Ошибка"
-                        else -> "Не защищено"
+                        checking -> tr("Проверяем сервер…", "Checking server…")
+                        status.phase == VpnPhase.CONNECTED -> tr("Защищено", "Protected")
+                        status.phase == VpnPhase.PAUSED -> tr("Пауза", "Paused")
+                        status.phase == VpnPhase.CONNECTING -> tr("Подключаем…", "Connecting…")
+                        status.phase == VpnPhase.ERROR -> tr("Ошибка", "Error")
+                        else -> tr("Не защищено", "Unprotected")
                     },
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
@@ -187,7 +213,7 @@ fun StatusCard(
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = shown?.name ?: "Сервер не выбран",
+                    text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
@@ -211,11 +237,11 @@ fun StatusCard(
             }
 
             val label = when {
-                checking -> "Проверяем…"
-                status.phase == VpnPhase.CONNECTING -> "Подключаем…"
-                status.phase == VpnPhase.PAUSED -> "Возобновить"
-                connected -> "Отключить"
-                else -> "Подключить"
+                checking -> tr("Проверяем…", "Checking…")
+                status.phase == VpnPhase.CONNECTING -> tr("Подключаем…", "Connecting…")
+                status.phase == VpnPhase.PAUSED -> tr("Возобновить", "Resume")
+                connected -> tr("Отключить", "Disconnect")
+                else -> tr("Подключить", "Connect")
             }
 
             Button(
@@ -243,7 +269,7 @@ fun StatusCard(
                             )
                         } else {
                             AppIcon(
-                                icon = if (text == "Отключить") AppIcons.Shield else AppIcons.Power,
+                                icon = if (connected) AppIcons.Shield else AppIcons.Power,
                                 modifier = Modifier.size(20.dp),
                             )
                         }
@@ -291,7 +317,7 @@ fun CompactStatusBar(
         animationSpec = tween(180),
         label = "compact-fg",
     )
-    val shape = RoundedCornerShape(26.dp)
+    val shape = Md3Shapes.card
 
     Surface(
         color = container,
@@ -309,7 +335,7 @@ fun CompactStatusBar(
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = shown?.name ?: "Сервер не выбран",
+                    text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -319,12 +345,12 @@ fun CompactStatusBar(
                     text = buildString {
                         append(
                             when {
-                                checkingServer != null -> "Проверяем…"
-                                status.phase == VpnPhase.CONNECTED -> "Защищено"
-                                status.phase == VpnPhase.PAUSED -> "Пауза"
-                                status.phase == VpnPhase.CONNECTING -> "Подключаем…"
-                                status.phase == VpnPhase.ERROR -> "Ошибка"
-                                else -> "Не защищено"
+                                checkingServer != null -> tr("Проверяем…", "Checking…")
+                                status.phase == VpnPhase.CONNECTED -> tr("Защищено", "Protected")
+                                status.phase == VpnPhase.PAUSED -> tr("Пауза", "Paused")
+                                status.phase == VpnPhase.CONNECTING -> tr("Подключаем…", "Connecting…")
+                                status.phase == VpnPhase.ERROR -> tr("Ошибка", "Error")
+                                else -> tr("Не защищено", "Unprotected")
                             },
                         )
                         if (connected) append(" · ").append(formatDuration(seconds))
@@ -356,7 +382,7 @@ fun CompactStatusBar(
                 } else {
                     AppIcon(
                         icon = if (connected) AppIcons.Shield else AppIcons.Power,
-                        contentDescription = if (connected) "Отключить" else "Подключить",
+                        contentDescription = if (connected) tr("Отключить", "Disconnect") else tr("Подключить", "Connect"),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -491,19 +517,20 @@ fun BulletinHost(
 }
 
 fun formatBytes(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes Б"
-    bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
-    bytes < 1024L * 1024 * 1024 -> "${bytes / (1024 * 1024)} МБ"
-    else -> "${bytes / (1024L * 1024 * 1024)} ГБ"
+    bytes < 1024 -> "$bytes " + tr("Б", "B")
+    bytes < 1024 * 1024 -> "${bytes / 1024} " + tr("КБ", "KB")
+    bytes < 1024L * 1024 * 1024 -> "${bytes / (1024 * 1024)} " + tr("МБ", "MB")
+    else -> "${bytes / (1024L * 1024 * 1024)} " + tr("ГБ", "GB")
 }
 
 /** Скорость: до сотни КБ/с — в килобайтах, дальше в мегабитах. */
 fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond < 1024) return "$bytesPerSecond Б/с"
-    if (bytesPerSecond < 100 * 1024) return "${bytesPerSecond / 1024} КБ/с"
+    if (bytesPerSecond < 1024) return "$bytesPerSecond " + tr("Б/с", "B/s")
+    if (bytesPerSecond < 100 * 1024) return "${bytesPerSecond / 1024} " + tr("КБ/с", "KB/s")
     val megabits = bytesPerSecond * 8.0 / 1_000_000.0
     val tenths = (megabits * 10).toInt()
-    return "${tenths / 10},${tenths % 10} Мбит/с"
+    val separator = if (AppLocale.language == dev.local.veil.core.AppLanguage.EN) "." else ","
+    return "${tenths / 10}$separator${tenths % 10} " + tr("Мбит/с", "Mbit/s")
 }
 
 fun formatDuration(totalSeconds: Int): String {
@@ -534,12 +561,12 @@ fun daysUntil(epochSeconds: Long, now: Long = currentTimeMillis()): Long =
     if (epochSeconds <= 0) Long.MAX_VALUE else (epochSeconds - now / 1000) / 86400
 
 fun formatAgo(timestamp: Long, now: Long = currentTimeMillis()): String {
-    if (timestamp <= 0) return "не обновлялась"
+    if (timestamp <= 0) return tr("не обновлялась", "never updated")
     val minutes = (now - timestamp) / 60_000
     return when {
-        minutes < 1 -> "только что"
-        minutes < 60 -> "$minutes мин назад"
-        minutes < 1440 -> "${minutes / 60} ч назад"
-        else -> "${minutes / 1440} дн назад"
+        minutes < 1 -> tr("только что", "just now")
+        minutes < 60 -> tr("$minutes мин назад", "$minutes min ago")
+        minutes < 1440 -> tr("${minutes / 60} ч назад", "${minutes / 60} h ago")
+        else -> tr("${minutes / 1440} дн назад", "${minutes / 1440} d ago")
     }
 }

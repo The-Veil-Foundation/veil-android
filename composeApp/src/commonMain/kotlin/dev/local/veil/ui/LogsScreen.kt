@@ -72,33 +72,33 @@ fun LogsScreen(
                 onClick = {
                     scope.launch {
                         reload()
-                        onBulletin("Лог обновлён")
+                        onBulletin(tr("Лог обновлён", "Log refreshed"))
                     }
                 },
             ) {
                 AppIcon(AppIcons.Refresh, modifier = Modifier.size(18.dp))
-                Text(" Обновить")
+                Text(tr(" Обновить", " Refresh"))
             }
             TextButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(lines.joinToString("\n")))
-                    onBulletin("Лог скопирован в буфер обмена")
+                    onBulletin(tr("Лог скопирован в буфер обмена", "Log copied to clipboard"))
                 },
             ) {
                 AppIcon(AppIcons.Copy, modifier = Modifier.size(18.dp))
-                Text(" Копировать")
+                Text(tr(" Копировать", " Copy"))
             }
             TextButton(
                 onClick = {
                     provider.clear()
                     scope.launch {
                         reload()
-                        onBulletin("Лог очищен")
+                        onBulletin(tr("Лог очищен", "Log cleared"))
                     }
                 },
             ) {
                 AppIcon(AppIcons.Trash, modifier = Modifier.size(18.dp))
-                Text(" Очистить")
+                Text(tr(" Очистить", " Clear"))
             }
         }
 
@@ -119,7 +119,7 @@ fun LogsScreen(
         ) {
             if (loading) {
                 Text(
-                    "Читаю лог…",
+                    tr("Читаю лог…", "Reading log…"),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(16.dp),
                 )

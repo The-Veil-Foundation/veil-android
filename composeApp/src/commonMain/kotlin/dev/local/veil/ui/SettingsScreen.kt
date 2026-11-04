@@ -22,6 +22,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import dev.local.veil.core.Appearance
 import dev.local.veil.core.SplitMode
 import dev.local.veil.platform.PingMode
 import dev.local.veil.platform.VpnPhase
@@ -30,11 +33,11 @@ import dev.local.veil.platform.VpnStatus
 /** Человеческое состояние туннеля для строки «Туннель». */
 private val VpnPhase.label: String
     get() = when (this) {
-        VpnPhase.DISCONNECTED -> "выключен"
-        VpnPhase.CONNECTING -> "подключение"
-        VpnPhase.CONNECTED -> "подключено"
-        VpnPhase.PAUSED -> "пауза"
-        VpnPhase.ERROR -> "ошибка"
+        VpnPhase.DISCONNECTED -> tr("выключен", "off")
+        VpnPhase.CONNECTING -> tr("подключение", "connecting")
+        VpnPhase.CONNECTED -> tr("подключено", "connected")
+        VpnPhase.PAUSED -> tr("пауза", "paused")
+        VpnPhase.ERROR -> tr("ошибка", "error")
     }
 
 @Composable
@@ -48,6 +51,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val settings = state.settings
+    val clipboard = LocalClipboardManager.current
     var showAbout by remember { mutableStateOf(false) }
 
     Column(
@@ -60,13 +64,13 @@ fun SettingsScreen(
         /* ---------------- Обновления ---------------- */
 
         SettingsGroup(
-            title = "Обновления",
+            title = tr("Обновления", "Updates"),
             icon = AppIcons.Update,
             rows = listOf(
                 {
                     SegmentAction(
-                        title = "Проверить обновления",
-                        subtitle = "Версия ${state.appVersion} · GitHub Releases",
+                        title = tr("Проверить обновления", "Check for updates"),
+                        subtitle = tr("Версия ${state.appVersion} · GitHub Releases", "Version ${state.appVersion} · GitHub Releases"),
                         onClick = { state.checkUpdates() },
                     )
                 },
@@ -76,13 +80,40 @@ fun SettingsScreen(
         /* ---------------- Оформление ---------------- */
 
         SettingsGroup(
-            title = "Оформление",
+            title = tr("Оформление", "Appearance"),
             icon = AppIcons.Moon,
             rows = listOf(
                 {
+                    SegmentChoice(
+                        title = tr("Язык", "Language"),
+                        subtitle = tr("Язык интерфейса", "Interface language"),
+                        options = dev.local.veil.core.AppLanguage.entries.map { language ->
+                            val label = if (language == dev.local.veil.core.AppLanguage.SYSTEM) {
+                                tr("Системный", "System")
+                            } else {
+                                language.nativeLabel
+                            }
+                            SegmentOption(label, settings.language == language) {
+                                state.saveSettings(settings.copy(language = language))
+                            }
+                        },
+                    )
+                },
+                {
+                    SegmentChoice(
+                        title = tr("Тема", "Theme"),
+                        subtitle = tr("Светлая, тёмная или как в системе", "Light, dark or follow the system"),
+                        options = Appearance.entries.map { appearance ->
+                            SegmentOption(appearanceTitle(appearance), settings.appearance == appearance) {
+                                state.saveSettings(settings.copy(appearance = appearance))
+                            }
+                        },
+                    )
+                },
+                {
                     SegmentSwitch(
                         title = "Pitch Black",
-                        subtitle = "Чёрный фон для OLED",
+                        subtitle = tr("Чёрный фон для OLED", "Pure black background for OLED"),
                         checked = settings.pitchBlack,
                         onCheckedChange = { state.saveSettings(settings.copy(pitchBlack = it)) },
                     )
@@ -93,27 +124,27 @@ fun SettingsScreen(
         /* ---------------- Диагностика ---------------- */
 
         SettingsGroup(
-            title = "Диагностика",
+            title = tr("Диагностика", "Diagnostics"),
             icon = AppIcons.Tuning,
             rows = listOf(
                 {
                     SegmentAction(
-                        title = "Логи ядра",
-                        subtitle = "Просмотр и копирование",
+                        title = tr("Логи ядра", "Core logs"),
+                        subtitle = tr("Просмотр и копирование", "View and copy"),
                         onClick = onOpenLogs,
                     )
                 },
                 {
                     SegmentAction(
-                        title = "Проверить соединение",
-                        subtitle = "Проверить выбранный узел",
+                        title = tr("Проверить соединение", "Test connection"),
+                        subtitle = tr("Проверить выбранный узел", "Test the selected server"),
                         onClick = { state.checkConnection() },
                     )
                 },
                 {
                     SegmentAction(
-                        title = "О приложении",
-                        subtitle = "Версия, ядро, исходники",
+                        title = tr("О приложении", "About"),
+                        subtitle = tr("Версия, ядро, исходники", "Version, core, sources"),
                         onClick = { showAbout = true },
                     )
                 },
@@ -123,13 +154,37 @@ fun SettingsScreen(
         /* ---------------- Туннель ---------------- */
 
         SettingsGroup(
-            title = "Туннель",
+            title = tr("Туннель", "Tunnel"),
             icon = AppIcons.Global,
             rows = listOf(
                 {
+                    SegmentSwitch(
+                        title = tr("Подключаться при запуске", "Connect on launch"),
+                        subtitle = tr("Сразу поднимать туннель к выбранному узлу", "Bring the tunnel up to the selected server"),
+                        checked = settings.autoConnect,
+                        onCheckedChange = { state.saveSettings(settings.copy(autoConnect = it)) },
+                    )
+                },
+                {
+                    SegmentChoice(
+                        title = tr("Уровень лога", "Log level"),
+                        subtitle = tr("Подробность диагностики ядра", "Core diagnostics verbosity"),
+                        options = listOf(
+                            "error" to tr("Ошибки", "Errors"),
+                            "warning" to tr("Предупреждения", "Warnings"),
+                            "info" to tr("Инфо", "Info"),
+                            "debug" to tr("Отладка", "Debug"),
+                        ).map { (value, label) ->
+                            SegmentOption(label, settings.logLevel == value) {
+                                state.saveSettings(settings.copy(logLevel = value))
+                            }
+                        },
+                    )
+                },
+                {
                     SegmentChoice(
                         title = "MTU",
-                        subtitle = "Размер пакета",
+                        subtitle = tr("Размер пакета", "Packet size"),
                         options = listOf(1280, 1400, 1500).map { mtu ->
                             SegmentOption("$mtu", settings.mtu == mtu) {
                                 state.saveSettings(settings.copy(mtu = mtu))
@@ -139,8 +194,8 @@ fun SettingsScreen(
                 },
                 {
                     SegmentSwitch(
-                        title = "IPv6 в туннеле",
-                        subtitle = "IPv6 пойдёт мимо VPN",
+                        title = tr("IPv6 в туннеле", "IPv6 in tunnel"),
+                        subtitle = tr("IPv6 пойдёт мимо VPN", "IPv6 will bypass the VPN"),
                         checked = settings.ipv6,
                         onCheckedChange = { state.saveSettings(settings.copy(ipv6 = it)) },
                     )
@@ -162,7 +217,7 @@ fun SettingsScreen(
                     SegmentInput(
                         value = settings.userAgent,
                         onValueChange = { state.saveSettings(settings.copy(userAgent = it)) },
-                        label = "User-Agent подписки",
+                        label = tr("User-Agent подписки", "Subscription User-Agent"),
                     )
                 },
             ),
@@ -171,21 +226,21 @@ fun SettingsScreen(
         /* ---------------- Обход блокировок ---------------- */
 
         SettingsGroup(
-            title = "Обход блокировок",
+            title = tr("Обход блокировок", "Censorship bypass"),
             icon = AppIcons.Shield,
             rows = listOf(
                 {
                     SegmentSwitch(
-                        title = "Фрагментация TLS",
-                        subtitle = "Дробление ClientHello, обход DPI",
+                        title = tr("Фрагментация TLS", "TLS fragmentation"),
+                        subtitle = tr("Дробление ClientHello, обход DPI", "Split ClientHello to evade DPI"),
                         checked = settings.fragment,
                         onCheckedChange = { state.saveSettings(settings.copy(fragment = it)) },
                     )
                 },
                 {
                     SegmentSwitch(
-                        title = "Российские домены напрямую",
-                        subtitle = ".ru, .su, .рф — мимо туннеля",
+                        title = tr("Российские домены напрямую", "Russian domains direct"),
+                        subtitle = tr(".ru, .su, .рф — мимо туннеля", ".ru, .su, .рф bypass the tunnel"),
                         checked = settings.bypassRu,
                         onCheckedChange = { state.saveSettings(settings.copy(bypassRu = it)) },
                     )
@@ -196,19 +251,19 @@ fun SettingsScreen(
         /* ---------------- Раздельный туннель ---------------- */
 
         SettingsGroup(
-            title = "Раздельный туннель",
+            title = tr("Раздельный туннель", "Split tunneling"),
             icon = AppIcons.Devices,
             rows = listOf(
                 {
                     SegmentAction(
                         title = when (settings.splitMode) {
-                            SplitMode.OFF -> "Выключен"
-                            SplitMode.EXCLUDE -> "Все, кроме ${settings.splitPackages.size} прил."
-                            SplitMode.INCLUDE -> "Только ${settings.splitPackages.size} прил."
+                            SplitMode.OFF -> tr("Выключен", "Off")
+                            SplitMode.EXCLUDE -> tr("Все, кроме ${settings.splitPackages.size} прил.", "All except ${settings.splitPackages.size} apps")
+                            SplitMode.INCLUDE -> tr("Только ${settings.splitPackages.size} прил.", "Only ${settings.splitPackages.size} apps")
                         },
                         subtitle = when (settings.splitMode) {
-                            SplitMode.OFF -> "Весь трафик идёт в VPN"
-                            else -> "Выбрать приложения"
+                            SplitMode.OFF -> tr("Весь трафик идёт в VPN", "All traffic goes through the VPN")
+                            else -> tr("Выбрать приложения", "Choose apps")
                         },
                         onClick = onOpenSplit,
                     )
@@ -219,27 +274,27 @@ fun SettingsScreen(
         /* ---------------- Подписка ---------------- */
 
         SettingsGroup(
-            title = "Подписка",
+            title = tr("Подписка", "Subscription"),
             icon = AppIcons.Cloud,
             rows = listOf(
                 {
                     SegmentAction(
                         title = if (state.subscriptions.isEmpty()) {
-                            "Подписок нет"
+                            tr("Подписок нет", "No subscriptions")
                         } else {
-                            "Подписок: ${state.subscriptions.size}"
+                            tr("Подписок: ${state.subscriptions.size}", "Subscriptions: ${state.subscriptions.size}")
                         },
-                        subtitle = "Обновление, добавление, удаление",
+                        subtitle = tr("Обновление, добавление, удаление", "Refresh, add, remove"),
                         onClick = onOpenSubscriptions,
                     )
                 },
                 {
                     SegmentChoice(
-                        title = "Автообновление",
-                        subtitle = "Как часто обновлять при запуске",
+                        title = tr("Автообновление", "Auto refresh"),
+                        subtitle = tr("Как часто обновлять при запуске", "How often to refresh on launch"),
                         options = listOf(0, 6, 12, 24).map { hours ->
                             SegmentOption(
-                                if (hours == 0) "выкл" else "${hours}ч",
+                                if (hours == 0) tr("выкл", "off") else tr("${hours}ч", "${hours}h"),
                                 settings.autoRefreshHours == hours,
                             ) {
                                 state.saveSettings(settings.copy(autoRefreshHours = hours))
@@ -253,15 +308,15 @@ fun SettingsScreen(
         /* ---------------- Пинг ---------------- */
 
         SettingsGroup(
-            title = "Пинг",
+            title = tr("Пинг", "Ping"),
             icon = AppIcons.Stopwatch,
             rows = listOf(
                 {
                     SegmentChoice(
-                        title = "Способ замера",
-                        subtitle = state.pingMode.hint,
+                        title = tr("Способ замера", "Measurement method"),
+                        subtitle = pingModeHint(state.pingMode),
                         options = PingMode.entries.map { mode ->
-                            SegmentOption(mode.label, state.pingMode == mode) {
+                            SegmentOption(pingModeTitle(mode), state.pingMode == mode) {
                                 state.choosePingMode(mode)
                             }
                         },
@@ -273,13 +328,13 @@ fun SettingsScreen(
         /* ---------------- Уведомления ---------------- */
 
         SettingsGroup(
-            title = "Уведомления",
+            title = tr("Уведомления", "Notifications"),
             icon = AppIcons.Bell,
             rows = listOf(
                 {
                     SegmentSwitch(
-                        title = "Показывать в шторке",
-                        subtitle = "Состояние VPN и быстрые действия",
+                        title = tr("Показывать в шторке", "Show in notification shade"),
+                        subtitle = tr("Состояние VPN и быстрые действия", "VPN status and quick actions"),
                         checked = settings.liveNotification,
                         onCheckedChange = { state.saveSettings(settings.copy(liveNotification = it)) },
                     )
@@ -290,14 +345,34 @@ fun SettingsScreen(
         /* ---------------- Перенос ---------------- */
 
         SettingsGroup(
-            title = "Перенос",
+            title = tr("Перенос", "Transfer"),
             icon = AppIcons.Qr,
             rows = listOf(
                 {
                     SegmentAction(
-                        title = "Принять с другого устройства",
-                        subtitle = "QR-код для переноса подписок",
+                        title = tr("Принять с другого устройства", "Receive from another device"),
+                        subtitle = tr("QR-код для переноса подписок", "QR code to transfer subscriptions"),
                         onClick = onOpenReceive,
+                    )
+                },
+            ),
+        )
+
+        /* ---------------- Устройство ---------------- */
+
+        SettingsGroup(
+            title = tr("Устройство", "Device"),
+            icon = AppIcons.Box,
+            rows = listOf(
+                { SegmentInfo(tr("ID устройства", "Device ID"), state.deviceId.take(18) + "…") },
+                {
+                    SegmentAction(
+                        title = tr("Копировать ID", "Copy ID"),
+                        subtitle = tr("Для панелей, которые требуют HWID", "For panels that require HWID"),
+                        onClick = {
+                            clipboard.setText(AnnotatedString(state.deviceId))
+                            state.showBulletin(tr("ID скопирован", "ID copied"), BulletinKind.SUCCESS)
+                        },
                     )
                 },
             ),
@@ -306,12 +381,12 @@ fun SettingsScreen(
         /* ---------------- Состояние ---------------- */
 
         SettingsGroup(
-            title = "Состояние",
+            title = tr("Состояние", "Status"),
             icon = AppIcons.Info,
             rows = listOf(
-                { SegmentInfo("Профилей", state.servers.size.toString()) },
-                { SegmentInfo("Туннель", status.phase.label) },
-                { SegmentInfo("Лог", "files/xray.log") },
+                { SegmentInfo(tr("Профилей", "Profiles"), state.servers.size.toString()) },
+                { SegmentInfo(tr("Туннель", "Tunnel"), status.phase.label) },
+                { SegmentInfo(tr("Лог", "Log"), "files/xray.log") },
             ),
         )
 
@@ -324,22 +399,22 @@ fun SettingsScreen(
             title = { Text("Veil", fontWeight = FontWeight.Black) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Версия ${state.appVersion}", style = MaterialTheme.typography.bodyMedium)
+                    Text(tr("Версия ${state.appVersion}", "Version ${state.appVersion}"), style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Узлов: ${state.servers.size} · подписок: ${state.subscriptions.size}",
+                        tr("Узлов: ${state.servers.size} · подписок: ${state.subscriptions.size}", "Servers: ${state.servers.size} · subscriptions: ${state.subscriptions.size}"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        "Туннель: ${if (status.isConnected) "поднят" else "выключен"}",
+                        "Туннель: ${if (status.isConnected) "поднят" else tr("выключен", "off")}",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAbout = false }) { Text("Закрыть") }
+                TextButton(onClick = { showAbout = false }) { Text(tr("Закрыть", "Close")) }
             },
             dismissButton = {
-                TextButton(onClick = { state.openSource() }) { Text("Исходный код") }
+                TextButton(onClick = { state.openSource() }) { Text(tr("Исходный код", "Source code")) }
             },
         )
     }
@@ -347,7 +422,7 @@ fun SettingsScreen(
     state.update?.let { release ->
         AlertDialog(
             onDismissRequest = { state.dismissUpdate() },
-            title = { Text("Доступно ${release.version}", fontWeight = FontWeight.Black) },
+            title = { Text(tr("Доступно ${release.version}", "Available ${release.version}"), fontWeight = FontWeight.Black) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (release.notes.isNotBlank()) {
@@ -373,10 +448,10 @@ fun SettingsScreen(
                 TextButton(
                     onClick = { state.downloadUpdate() },
                     enabled = state.updateProgress == null,
-                ) { Text("Скачать и установить") }
+                ) { Text(tr("Скачать и установить", "Download and install")) }
             },
             dismissButton = {
-                TextButton(onClick = { state.dismissUpdate() }) { Text("Позже") }
+                TextButton(onClick = { state.dismissUpdate() }) { Text(tr("Позже", "Later")) }
             },
         )
     }

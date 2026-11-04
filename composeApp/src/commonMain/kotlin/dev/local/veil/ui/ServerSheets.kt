@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -179,8 +181,8 @@ private fun ActionsSheet(
                                                 contentColor = MaterialTheme.colorScheme.onError,
                                             ),
                                             shape = RoundedCornerShape(18.dp),
-                                        ) { Text("Удалить") }
-                                        TextButton(onClick = { confirming = null }) { Text("Отмена") }
+                                        ) { Text(tr("Удалить", "Delete")) }
+                                        TextButton(onClick = { confirming = null }) { Text(tr("Отмена", "Cancel")) }
                                     }
                                 }
                             }
@@ -188,14 +190,14 @@ private fun ActionsSheet(
                     }
 
                     SheetPage.DETAILS -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PageBar(title = "Подробности", onBack = { page = SheetPage.ACTIONS }) {
+                        PageBar(title = tr("Подробности", "Details"), onBack = { page = SheetPage.ACTIONS }) {
                             TextButton(onClick = { reveal = !reveal }) {
                                 AppIcon(
                                     if (reveal) AppIcons.EyeOff else AppIcons.Eye,
                                     modifier = Modifier.size(18.dp),
                                 )
                                 Spacer(Modifier.size(6.dp))
-                                Text(if (reveal) "Скрыть ключи" else "Показать ключи")
+                                Text(if (reveal) tr("Скрыть ключи", "Hide keys") else tr("Показать ключи", "Show keys"))
                             }
                         }
                         Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
@@ -208,7 +210,7 @@ private fun ActionsSheet(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        PageBar(title = "QR-код", onBack = { page = SheetPage.ACTIONS }) {}
+                        PageBar(title = tr("QR-код", "QR code"), onBack = { page = SheetPage.ACTIONS }) {}
                         if (qrText != null) QrCode(text = qrText, side = 260.dp)
                         Text(
                             qrCaption,
@@ -221,7 +223,7 @@ private fun ActionsSheet(
                             TextButton(onClick = onShareQr) {
                                 AppIcon(AppIcons.Share, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(6.dp))
-                                Text("Поделиться ссылкой")
+                                Text(tr("Поделиться ссылкой", "Share link"))
                             }
                         }
                     }
@@ -260,7 +262,7 @@ private fun SheetHeader(icon: ImageVector, title: String, subtitle: String) {
 private fun PageBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) {
-            AppIcon(AppIcons.ArrowLeft, contentDescription = "Назад")
+            AppIcon(AppIcons.ArrowLeft, contentDescription = tr("Назад", "Back"))
         }
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         actions()
@@ -278,8 +280,8 @@ private fun ActionTile(
 ) {
     val source = remember { MutableInteractionSource() }
     val scale = pressScale(source, 0.97f)
-    val top = if (index == 0) 24.dp else 6.dp
-    val bottom = if (index == last) 24.dp else 6.dp
+    val top = if (index == 0) 28.dp else 10.dp
+    val bottom = if (index == last) 28.dp else 10.dp
     val container = if (action.destructive) {
         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
     } else {
@@ -336,74 +338,164 @@ fun ServerActionsSheet(
     val clipboard = LocalClipboardManager.current
     val link = remember(server) { state.linkFor(server) }
     val selected = state.selected?.id == server.id
+    val annotation = state.annotationFor(server.id)
+    var editingNote by remember { mutableStateOf(false) }
     val ping = state.pings[server.id]
     val endpoint = if (server.balanced > 1) {
-        "авто из ${server.balanced} транспортов"
+        tr("авто из ${server.balanced} транспортов", "auto from ${server.balanced} transports")
     } else {
         server.endpoint
     }
 
     ActionsSheet(
         icon = AppIcons.Server,
-        title = server.name,
+        title = state.displayName(server),
         subtitle = buildString {
             append(server.proto.wire.uppercase()).append(" · ").append(endpoint)
-            if (ping != null) append(" · ").append(ping).append(" мс")
+            if (ping != null) append(" · ").append(ping).append(tr(" мс", " ms"))
         },
         qrText = link,
-        qrCaption = "Ссылка содержит ключи доступа — показывайте её только своим устройствам.",
+        qrCaption = tr("Ссылка содержит ключи доступа — показывайте её только своим устройствам.", "The link contains access keys — only show it to your own devices."),
         onShareQr = link?.let { { state.share(it) } },
         details = { reveal -> ServerDetails(server, reveal) },
         buildActions = { sheet ->
             buildList {
                 if (!selected) {
-                    add(SheetAction(AppIcons.Check, "Выбрать") {
+                    add(SheetAction(AppIcons.Check, tr("Выбрать", "Select")) {
                         sheet.close { state.select(server.id, status) }
                     })
                 }
-                add(SheetAction(AppIcons.Stopwatch, "Проверить пинг", "Метод: ${state.pingMode.label}") {
+                add(SheetAction(AppIcons.Stopwatch, tr("Проверить пинг", "Ping"), tr("Метод: ${state.pingMode.label}", "Method: ${pingModeTitle(state.pingMode)}")) {
                     sheet.close { state.pingOne(server) }
                 })
-                add(SheetAction(AppIcons.Eye, "Посмотреть", "Параметры узла") {
+                add(SheetAction(AppIcons.Eye, tr("Посмотреть", "View"), tr("Параметры узла", "Server details")) {
                     sheet.navigate(SheetPage.DETAILS)
                 })
+                add(
+                    SheetAction(
+                        icon = AppIcons.Note,
+                        title = tr("Изменить", "Edit"),
+                        subtitle = tr("Имя, заметка, теги, скрытие", "Name, note, tags, visibility"),
+                    ) { sheet.close { editingNote = true } },
+                )
                 if (link != null) {
-                    add(SheetAction(AppIcons.Qr, "QR-код", "Перенести на другое устройство") {
+                    add(SheetAction(AppIcons.Qr, tr("QR-код", "QR code"), tr("Перенести на другое устройство", "Transfer to another device")) {
                         sheet.navigate(SheetPage.QR)
                     })
-                    add(SheetAction(AppIcons.Copy, "Копировать ссылку") {
+                    add(SheetAction(AppIcons.Copy, tr("Копировать ссылку", "Copy link")) {
                         sheet.close {
                             clipboard.setText(AnnotatedString(link))
-                            state.showBulletin("Ссылка скопирована", BulletinKind.SUCCESS)
+                            state.showBulletin(tr("Ссылка скопирована", "Link copied"), BulletinKind.SUCCESS)
                         }
                     })
-                    add(SheetAction(AppIcons.Share, "Поделиться") {
+                    add(SheetAction(AppIcons.Share, tr("Поделиться", "Share")) {
                         sheet.close { state.share(link) }
                     })
                 }
                 add(
                     SheetAction(
                         icon = AppIcons.Trash,
-                        title = "Удалить",
+                        title = tr("Удалить", "Delete"),
                         destructive = true,
-                        confirmText = "Удалить «${server.name}»? Это нельзя отменить.",
+                        confirmText = tr("Удалить «${server.name}»? Это нельзя отменить.", "Delete “${server.name}”? This cannot be undone."),
                     ) { sheet.close { state.removeServer(server.id) } },
                 )
             }
         },
         onDismiss = onDismiss,
     )
+
+    if (editingNote) {
+        var name by remember { mutableStateOf(annotation.nameOverride) }
+        var note by remember { mutableStateOf(annotation.note) }
+        var tags by remember { mutableStateOf(annotation.tags.joinToString(", ")) }
+        var pinned by remember { mutableStateOf(annotation.pinned) }
+        var hidden by remember { mutableStateOf(annotation.hidden) }
+        AlertDialog(
+            onDismissRequest = { editingNote = false },
+            title = { Text(tr("Изменить узел", "Edit server"), fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(tr("Своё имя", "Custom name")) },
+                        placeholder = { Text(server.name) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text(tr("Заметка", "Note")) },
+                        minLines = 2,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = tags,
+                        onValueChange = { tags = it },
+                        label = { Text(tr("Теги через запятую", "Tags separated by commas")) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tr("Закрепить", "Pin"), style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                tr("Держать выше остальных", "Keep above the rest"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        androidx.compose.material3.Switch(checked = pinned, onCheckedChange = { pinned = it })
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tr("Скрыть", "Hide"), style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                tr("Убрать из списка, не удаляя", "Remove from the list without deleting"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        androidx.compose.material3.Switch(checked = hidden, onCheckedChange = { hidden = it })
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.saveAnnotation(
+                        server.id,
+                        annotation.copy(
+                            nameOverride = name.trim(),
+                            note = note.trim(),
+                            tags = tags.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+                            pinned = pinned,
+                            hidden = hidden,
+                        ),
+                    )
+                    editingNote = false
+                }) { Text(tr("Сохранить", "Save")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingNote = false }) { Text(tr("Отмена", "Cancel")) }
+            },
+        )
+    }
 }
 
 /** Параметры узла. Ключи скрыты, пока их явно не покажут. */
 @Composable
 private fun ServerDetails(server: ProxyConfig, reveal: Boolean) {
     val rows = buildList {
-        add(Triple("Протокол", server.proto.wire.uppercase(), false))
-        add(Triple("Адрес", server.endpoint, false))
-        if (server.balanced > 1) add(Triple("Транспортов", "${server.balanced} (балансировщик)", false))
-        add(Triple("Транспорт", server.network.wire, false))
-        add(Triple("Защита", server.security.wire, false))
+        add(Triple(tr("Протокол", "Protocol"), server.proto.wire.uppercase(), false))
+        add(Triple(tr("Адрес", "Address"), server.endpoint, false))
+        if (server.balanced > 1) add(Triple(tr("Транспортов", "Transports"), tr("${server.balanced} (балансировщик)", "${server.balanced} (balancer)"), false))
+        add(Triple(tr("Транспорт", "Transport"), server.network.wire, false))
+        add(Triple(tr("Защита", "Security"), server.security.wire, false))
         server.sni?.let { add(Triple("SNI", it, false)) }
         server.fingerprint?.let { add(Triple("Fingerprint", it, false)) }
         server.alpn?.takeIf { it.isNotEmpty() }?.let { add(Triple("ALPN", it.joinToString(", "), false)) }
@@ -415,15 +507,15 @@ private fun ServerDetails(server: ProxyConfig, reveal: Boolean) {
         server.publicKey?.let { add(Triple("Public key", it, false)) }
         server.shortId?.let { add(Triple("Short ID", it, false)) }
         server.uuid?.let { add(Triple("UUID", it, true)) }
-        server.password?.let { add(Triple("Пароль", it, true)) }
-        server.privateKey?.let { add(Triple("Приватный ключ", it, true)) }
+        server.password?.let { add(Triple(tr("Пароль", "Password"), it, true)) }
+        server.privateKey?.let { add(Triple(tr("Приватный ключ", "Private key"), it, true)) }
         server.presharedKey?.let { add(Triple("Preshared key", it, true)) }
-        server.source?.let { add(Triple("Подписка", it.substringAfter("://").substringBefore('/'), false)) }
+        server.source?.let { add(Triple(tr("Подписка", "Subscription"), it.substringAfter("://").substringBefore('/'), false)) }
     }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         rows.forEachIndexed { index, (label, value, secret) ->
-            val top = if (index == 0) 20.dp else 6.dp
-            val bottom = if (index == rows.lastIndex) 20.dp else 6.dp
+            val top = if (index == 0) 28.dp else 10.dp
+            val bottom = if (index == rows.lastIndex) 28.dp else 10.dp
             Surface(
                 shape = RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -455,9 +547,9 @@ private fun ServerDetails(server: ProxyConfig, reveal: Boolean) {
                 color = MaterialTheme.colorScheme.surfaceContainer,
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Конфиг Xray из подписки", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text(tr("Конфиг Xray из подписки", "Xray config from subscription"), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        text = if (reveal) prettyJson(raw) else "Скрыт: в нём ключи. Нажмите «Показать ключи».",
+                        text = if (reveal) prettyJson(raw) else tr("Скрыт: в нём ключи. Нажмите «Показать ключи».", "Hidden: it contains keys. Tap “Show keys”."),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = if (reveal) FontFamily.Monospace else FontFamily.Default,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -492,50 +584,50 @@ fun SubscriptionActionsSheet(
     ActionsSheet(
         icon = AppIcons.Cloud,
         title = title,
-        subtitle = if (source == null) "${servers.size} серверов, добавлены вручную" else "${servers.size} серверов",
+        subtitle = if (source == null) tr("${servers.size} серверов, добавлены вручную", "${servers.size} servers, added manually") else tr("${servers.size} серверов", "${servers.size} servers"),
         qrText = source,
-        qrCaption = "Ссылка подписки даёт доступ ко всем серверам — показывайте её только своим устройствам. " +
-            "На приставке откройте «Принять с другого устройства» и отсканируйте код в Veil на телефоне.",
+        qrCaption = tr("Ссылка подписки даёт доступ ко всем серверам — показывайте её только своим устройствам. ", "The subscription link grants access to all servers — only show it to your own devices. ") +
+            tr("На приставке откройте «Принять с другого устройства» и отсканируйте код в Veil на телефоне.", "On the TV box open “Receive from another device” and scan the code in Veil on your phone."),
         onShareQr = source?.let { { state.share(it) } },
         details = null,
         buildActions = { sheet ->
             buildList {
-                add(SheetAction(AppIcons.Stopwatch, "Проверить пинг группы", "Метод: ${state.pingMode.label}") {
+                add(SheetAction(AppIcons.Stopwatch, tr("Проверить пинг группы", "Ping group"), tr("Метод: ${state.pingMode.label}", "Method: ${pingModeTitle(state.pingMode)}")) {
                     sheet.close { state.pingSource(source) }
                 })
                 if (source != null) {
-                    add(SheetAction(AppIcons.Refresh, "Обновить подписку") {
+                    add(SheetAction(AppIcons.Refresh, tr("Обновить подписку", "Refresh subscription")) {
                         sheet.close {
                             state.subscriptions.firstOrNull { it.url == source }?.let(state::refreshSubscription)
                         }
                     })
-                    add(SheetAction(AppIcons.Qr, "QR-код подписки", "Перенести на приставку или телефон") {
+                    add(SheetAction(AppIcons.Qr, tr("QR-код подписки", "Subscription QR code"), tr("Перенести на приставку или телефон", "Transfer to TV box or phone")) {
                         sheet.navigate(SheetPage.QR)
                     })
-                    add(SheetAction(AppIcons.Copy, "Копировать ссылку") {
+                    add(SheetAction(AppIcons.Copy, tr("Копировать ссылку", "Copy link")) {
                         sheet.close {
                             clipboard.setText(AnnotatedString(source))
-                            state.showBulletin("Ссылка скопирована", BulletinKind.SUCCESS)
+                            state.showBulletin(tr("Ссылка скопирована", "Link copied"), BulletinKind.SUCCESS)
                         }
                     })
-                    add(SheetAction(AppIcons.Share, "Поделиться") {
+                    add(SheetAction(AppIcons.Share, tr("Поделиться", "Share")) {
                         sheet.close { state.share(source) }
                     })
                 }
                 add(
                     SheetAction(
                         icon = if (collapsed) AppIcons.ChevronDown else AppIcons.ChevronUp,
-                        title = if (collapsed) "Развернуть список" else "Свернуть список",
+                        title = if (collapsed) tr("Развернуть список", "Expand list") else tr("Свернуть список", "Collapse list"),
                     ) { sheet.close(onToggleCollapse) },
                 )
                 if (source != null) {
                     add(
                         SheetAction(
                             icon = AppIcons.Trash,
-                            title = "Удалить подписку",
-                            subtitle = "Вместе со всеми её серверами",
+                            title = tr("Удалить подписку", "Delete subscription"),
+                            subtitle = tr("Вместе со всеми её серверами", "Along with all its servers"),
                             destructive = true,
-                            confirmText = "Удалить подписку «$title» и ${servers.size} серверов?",
+                            confirmText = tr("Удалить подписку «$title» и ${servers.size} серверов?", "Delete subscription “$title” and ${servers.size} servers?"),
                         ) {
                             sheet.close {
                                 state.subscriptions.firstOrNull { it.url == source }?.let(state::removeSubscription)

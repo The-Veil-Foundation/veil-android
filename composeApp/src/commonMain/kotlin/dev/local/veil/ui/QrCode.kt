@@ -36,7 +36,7 @@ fun QrCode(text: String, modifier: Modifier = Modifier, side: Dp = 240.dp) {
         Box(Modifier.size(side).padding(18.dp), contentAlignment = Alignment.Center) {
             if (matrix == null) {
                 Text(
-                    "Не удалось создать QR: данные слишком длинные",
+                    tr("Не удалось создать QR: данные слишком длинные", "Could not create the QR code: the data is too long"),
                     color = Color.Black,
                     textAlign = TextAlign.Center,
                 )

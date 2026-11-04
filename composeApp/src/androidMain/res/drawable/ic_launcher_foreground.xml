@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <!-- монета -->
-    <path android:fillColor="#FFFFFF" android:fillAlpha="0.16"
-        android:pathData="M54,28 A26,26 0 1,1 53.9,28 Z" />
-    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="1.6"
-        android:fillColor="#00000000"
-        android:pathData="M54,28 A26,26 0 1,1 53.9,28 Z" />
-    <!-- буква V -->
-    <path android:strokeColor="#452E7E" android:strokeWidth="5.4"
-        android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:fillColor="#00000000"
-        android:pathData="M44,44 L54,64 L64,44" />
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="16.75"
+        android:translateY="16.75"
+        android:scaleX="0.5624"
+        android:scaleY="0.5624">
+        <path
+            android:fillColor="#304E40"
+            android:pathData="M71.55 14.575L21.2 31.8V64.925C21.2 88.775 34.45 106 53 116.6L60.95 98.05C47.7 90.1 39.75 79.5 39.75 63.6V45.05L64.925 35.775L71.55 14.575Z" />
+        <path
+            android:fillColor="#304E40"
+            android:pathData="M86.125 19.875L111.3 29.15V63.6C111.3 87.45 98.05 106 70.225 120.575L78.175 94.075C87.45 84.8 92.75 74.2 92.75 62.275V43.725L79.5 38.425L86.125 19.875Z" />
+    </group>
 </vector>

@@ -2,6 +2,54 @@ package dev.local.veil.core
 
 import kotlinx.serialization.Serializable
 
+/** Стиль разметки: iOS-лэйаут при сохранении Material-компонентов. */
+@Serializable
+enum class AppStyle {
+    MATERIAL,
+    IOS,
+    ;
+
+    val label: String
+        get() = when (this) {
+            MATERIAL -> "Material 3"
+            IOS -> "iOS"
+        }
+}
+
+/** Язык интерфейса. */
+@Serializable
+enum class AppLanguage {
+    /** Как в системе: русский для ru, иначе английский. */
+    SYSTEM,
+    RU,
+    EN,
+    ;
+
+    /** Подпись в списке выбора — на самом языке. */
+    val nativeLabel: String
+        get() = when (this) {
+            SYSTEM -> "Системный"
+            RU -> "Русский"
+            EN -> "English"
+        }
+}
+
+/** Тема оформления: системная, светлая или тёмная. */
+@Serializable
+enum class Appearance {
+    SYSTEM,
+    LIGHT,
+    DARK,
+    ;
+
+    val label: String
+        get() = when (this) {
+            SYSTEM -> "Системная"
+            LIGHT -> "Светлая"
+            DARK -> "Тёмная"
+        }
+}
+
 /** Ядро прокси: авто, Xray или sing-box. */
 @Serializable
 enum class CoreEngine {
@@ -62,20 +110,55 @@ data class AppSettings(
     val fragment: Boolean = false,
     /** Российские домены — напрямую, мимо туннеля. */
     val bypassRu: Boolean = false,
+    /** Язык интерфейса: как в системе по умолчанию. */
+    val language: AppLanguage = AppLanguage.SYSTEM,
+    /** Тема: системная по умолчанию. */
+    val appearance: Appearance = Appearance.SYSTEM,
     /** Pitch Black: чистый чёрный фон для OLED. По умолчанию выключен. */
     val pitchBlack: Boolean = false,
+    /** Подключаться к выбранному узлу при запуске приложения. */
+    val autoConnect: Boolean = false,
+    /** Пресет маршрутизации: что идёт в туннель, а что напрямую. */
+    val routingPreset: RoutingPreset = RoutingPreset.BYPASS_LAN,
+    val customRules: List<RoutingRule> = emptyList(),
+    val blockAds: Boolean = true,
+    val groups: List<ServerGroup> = emptyList(),
+    val dnsSettings: DnsSettings = DnsSettings(),
+    /** Заметки, теги и скрытые узлы — по id. */
+    val annotations: Map<String, NodeAnnotation> = emptyMap(),
+    /** Откуда скачивать geoip.dat / geosite.dat. */
+    val geoSource: GeoAssetSource = GeoAssetSource.LOYALSOILDIER,
+    /** Выбранные готовые списки доменов и подсетей. */
+    val communityLists: List<String> = emptyList(),
+    /** Куда отправлять совпадения из готовых списков. */
+    val communityListTarget: RuleTarget = RuleTarget(TargetKind.PROXY),
 ) {
-    fun toTunnelOptions(logFile: String? = null) = TunnelOptions(
-        mtu = mtu,
-        ipv6 = ipv6,
-        logLevel = logLevel,
-        logFile = logFile,
-        dnsServers = dns,
-        fragment = fragment,
-        bypassRu = bypassRu,
-        // Ядро выбирается автоматически по протоколу; ручного выбора в UI нет.
-        coreEngine = CoreEngine.AUTO,
-    )
+    fun toTunnelOptions(
+        logFile: String? = null,
+        servers: List<ProxyConfig> = emptyList(),
+        group: ServerGroup? = null,
+    ): TunnelOptions {
+        val activeRules = buildList {
+            if (routingPreset != RoutingPreset.CUSTOM) addAll(routingPreset.builtInRules())
+            addAll(customRules)
+        }
+        val members = group?.members(servers).orEmpty()
+        return TunnelOptions(
+            mtu = mtu,
+            ipv6 = ipv6,
+            logLevel = logLevel,
+            logFile = logFile,
+            dnsServers = dns,
+            fragment = fragment,
+            bypassRu = bypassRu,
+            // Ядро выбирается автоматически по протоколу; ручного выбора в UI нет.
+            coreEngine = CoreEngine.AUTO,
+            rules = activeRules,
+            blockAds = blockAds,
+            dnsSettings = dnsSettings,
+            balancerMembers = if (group?.kind == GroupKind.URLTEST) members else emptyList(),
+        )
+    }
 }
 
 @Serializable
@@ -90,4 +173,9 @@ data class Subscription(
     val totalBytes: Long = 0L,
     /** Срок действия подписки, epoch-секунды. */
     val expireAt: Long = 0L,
+    /** Описание/анонс от панели (заголовок announce). */
+    val description: String = "",
+    /** Страница поддержки и сайт подписки. */
+    val supportUrl: String = "",
+    val webUrl: String = "",
 )

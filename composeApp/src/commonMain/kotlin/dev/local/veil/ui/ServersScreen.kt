@@ -17,6 +17,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.draw.rotate
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -47,6 +49,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,6 +76,7 @@ private data class Group(
     val source: String?,
     val servers: List<ProxyConfig>,
     val meta: String? = null,
+    val description: String = "",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,8 +99,8 @@ fun ServersScreen(
 
     val groups = remember(state.servers, state.subscriptions, onlyFast, state.pings, query) {
         val needle = query.trim()
-        val visible = state.servers
-            .filter { needle.isEmpty() || it.name.contains(needle, ignoreCase = true) }
+        val visible = state.visibleServers
+            .filter { needle.isEmpty() || state.displayName(it).contains(needle, ignoreCase = true) }
             .filter { !onlyFast || (state.pings[it.id] ?: Int.MAX_VALUE) < 250 }
 
         visible.groupBy { it.source }.map { (source, list) ->
@@ -104,21 +108,22 @@ fun ServersScreen(
             val meta = subscription?.let { sub ->
                 buildList {
                     if (sub.totalBytes > 0) {
-                        add("${formatBytes(sub.usedBytes)} из ${formatBytes(sub.totalBytes)}")
+                        add(tr("${formatBytes(sub.usedBytes)} из ${formatBytes(sub.totalBytes)}", "${formatBytes(sub.usedBytes)} of ${formatBytes(sub.totalBytes)}"))
                     }
-                    if (sub.expireAt > 0) add("до ${formatDate(sub.expireAt)}")
+                    if (sub.expireAt > 0) add(tr("до ${formatDate(sub.expireAt)}", "until ${formatDate(sub.expireAt)}"))
                 }.joinToString(" · ").ifBlank { null }
             }
             Group(
                 key = source ?: "manual",
                 title = when {
-                    source == null -> "Вручную"
+                    source == null -> tr("Вручную", "Manual")
                     subscription?.title?.isNotBlank() == true -> subscription.title
                     else -> source.substringAfter("://").substringBefore('/')
                 },
                 source = source,
                 servers = list,
                 meta = meta,
+                description = subscription?.description.orEmpty(),
             )
         }
     }
@@ -136,8 +141,12 @@ fun ServersScreen(
         AnimatedContent(
             targetState = compact,
             transitionSpec = {
-                (fadeIn(tween(180)) + scaleIn(initialScale = 0.97f)) togetherWith
-                    (fadeOut(tween(180)) + scaleOut(targetScale = 0.99f))
+                if (state.isTv) {
+                    EnterTransition.None togetherWith ExitTransition.None
+                } else {
+                    (fadeIn(tween(180)) + scaleIn(initialScale = 0.97f)) togetherWith
+                        (fadeOut(tween(180)) + scaleOut(targetScale = 0.99f))
+                }
             },
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             label = "status-morph",
@@ -161,19 +170,27 @@ fun ServersScreen(
             }
         }
 
-        LazyColumn(
-            state = listState,
+        RefreshableBox(
+            enabled = !state.isTv,
+            isRefreshing = state.busy,
+            onRefresh = { state.refreshAll() },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
+        ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
         if (state.update != null) {
             item(key = "update") { UpdateAvailableRow(state = state) }
         }
-        item(key = "search") {
-            SearchPill(query = query, onQueryChange = { query = it })
+        if (!state.isTv) {
+            item(key = "search") {
+                SearchPill(query = query, onQueryChange = { query = it })
+            }
         }
         item {
             Row(
@@ -184,12 +201,12 @@ fun ServersScreen(
                 FilterChip(
                     selected = !onlyFast,
                     onClick = { onlyFast = false },
-                    label = { Text("Все (${state.servers.size})") },
+                    label = { Text(tr("Все (${state.servers.size})", "All (${state.servers.size})")) },
                 )
                 FilterChip(
                     selected = onlyFast,
                     onClick = { onlyFast = true },
-                    label = { Text("Быстрые") },
+                    label = { Text(tr("Быстрые", "Fastest")) },
                 )
                 Spacer(Modifier.weight(1f))
                 TextButton(
@@ -198,7 +215,7 @@ fun ServersScreen(
                 ) {
                     AppIcon(AppIcons.Stopwatch, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(4.dp))
-                    Text(if (state.pinging) "Стоп" else "Пинг")
+                    Text(if (state.pinging) tr("Стоп", "Stop") else tr("Пинг", "Ping"))
                 }
             }
         }
@@ -207,9 +224,9 @@ fun ServersScreen(
             item {
                 Text(
                     text = if (state.servers.isEmpty()) {
-                        "Серверов пока нет.\nНажмите + и вставьте ссылку на подписку."
+                        tr("Серверов пока нет.\nНажмите + и вставьте ссылку на подписку.", "No servers yet.\nTap + and paste a subscription link.")
                     } else {
-                        if (query.isNotBlank()) "Ничего не найдено." else "Под фильтр ничего не подходит."
+                        if (query.isNotBlank()) tr("Ничего не найдено.", "Nothing found.") else tr("Под фильтр ничего не подходит.", "Nothing matches the filter.")
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -221,14 +238,14 @@ fun ServersScreen(
                 item(key = "receive-cta") {
                     Button(
                         onClick = onOpenReceive,
-                        shape = RoundedCornerShape(24.dp),
+                        shape = Md3Shapes.card,
                         modifier = Modifier
                             .staggerIn(seen, "cta", 1)
                             .padding(horizontal = 24.dp, vertical = 16.dp),
                     ) {
                         AppIcon(AppIcons.Qr, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.size(8.dp))
-                        Text("Принять с телефона по QR", fontWeight = FontWeight.Bold)
+                        Text(tr("Принять с телефона по QR", "Receive from phone via QR"), fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -236,10 +253,11 @@ fun ServersScreen(
             groups.forEach { group ->
                 item(key = "header-${group.key}") {
                     GroupHeader(
-                        modifier = Modifier.animateItem(),
+                        modifier = if (state.isTv) Modifier else Modifier.animateItem(),
                         group = group,
                         expanded = group.key !in collapsed,
-                        pinging = state.pinging,
+                        pinging = group.servers.any { it.id in state.pingingIds },
+                        pingEnabled = !state.pinging,
                         onToggle = {
                             collapsed = if (group.key in collapsed) collapsed - group.key else collapsed + group.key
                         },
@@ -251,20 +269,22 @@ fun ServersScreen(
                 if (group.key !in collapsed) {
                     itemsIndexed(group.servers, key = { _, it -> it.id }) { i, server ->
                         ServerRow(
-                            modifier = Modifier.animateItem(),
+                            modifier = if (state.isTv) Modifier else Modifier.animateItem(),
                             first = i == 0,
                             last = i == group.servers.lastIndex,
                             server = server,
                             selected = server.id == state.selected?.id,
                             ping = state.pings[server.id],
                             measured = server.id in state.pings,
-                            pinging = state.pinging,
+                            pinging = server.id in state.pingingIds,
+                            title = state.displayName(server),
                             onClick = { state.select(server.id, status) },
                             onLongClick = { sheetServer = server },
                         )
                     }
                 }
             }
+        }
         }
         }
     }
@@ -322,7 +342,7 @@ private fun SearchPill(query: String, onQueryChange: (String) -> Unit) {
                 decorationBox = { inner ->
                     if (query.isEmpty()) {
                         Text(
-                            "Поиск серверов…",
+                            tr("Поиск серверов…", "Search servers…"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -337,7 +357,7 @@ private fun SearchPill(query: String, onQueryChange: (String) -> Unit) {
                 ) {
                     AppIcon(
                         AppIcons.Close,
-                        contentDescription = "Очистить",
+                        contentDescription = tr("Очистить", "Clear"),
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -352,6 +372,7 @@ private fun GroupHeader(
     group: Group,
     expanded: Boolean,
     pinging: Boolean,
+    pingEnabled: Boolean,
     onToggle: () -> Unit,
     onPing: () -> Unit,
     onMore: () -> Unit,
@@ -402,12 +423,30 @@ private fun GroupHeader(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (group.description.isNotBlank()) {
+                Text(
+                    text = group.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
-        IconButton(onClick = onPing, enabled = !pinging) {
-            AppIcon(AppIcons.Stopwatch, contentDescription = "Пинг группы", modifier = Modifier.size(20.dp))
+        IconButton(onClick = onPing, enabled = pingEnabled) {
+            if (pinging) {
+                ExpressiveLoader(diameter = 18.dp)
+            } else {
+                AppIcon(
+                    AppIcons.Stopwatch,
+                    contentDescription = tr("Пинг группы", "Ping group"),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
         IconButton(onClick = onMore) {
-            AppIcon(AppIcons.More, contentDescription = "Действия", modifier = Modifier.size(20.dp))
+            AppIcon(AppIcons.More, contentDescription = tr("Действия", "Actions"), modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -422,6 +461,7 @@ private fun ServerRow(
     ping: Int?,
     measured: Boolean,
     pinging: Boolean,
+    title: String = server.name,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -438,7 +478,7 @@ private fun ServerRow(
 
     // Сегментированный список как в bottom sheet: крайние строки крупнее.
     val corner by animateDpAsState(
-        targetValue = if (selected) 28.dp else 20.dp,
+        targetValue = if (selected) 32.dp else 24.dp,
         animationSpec = tween(180),
         label = "row-corner",
     )
@@ -453,8 +493,8 @@ private fun ServerRow(
         label = "row-fg",
     )
     val haptics = LocalHapticFeedback.current
-    val topRadius = if (first) corner else 6.dp
-    val bottomRadius = if (last) corner else 6.dp
+    val topRadius = if (first) corner else Md3Shapes.xs
+    val bottomRadius = if (last) corner else Md3Shapes.xs
     val rowShape = RoundedCornerShape(
         topStart = topRadius,
         topEnd = topRadius,
@@ -498,7 +538,7 @@ private fun ServerRow(
                 )
                 Text(
                     text = if (server.balanced > 1) {
-                        "${server.proto.wire.uppercase()} · авто из ${server.balanced} транспортов"
+                        tr("${server.proto.wire.uppercase()} · авто из ${server.balanced} транспортов", "${server.proto.wire.uppercase()} · auto from ${server.balanced} transports")
                     } else {
                         "${server.proto.wire.uppercase()} · ${server.endpoint}"
                     },
@@ -536,17 +576,17 @@ private fun UpdateAvailableRow(state: VeilState) {
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Доступно обновление ${release.version}",
+                    tr("Доступно обновление ${release.version}", "Update ${release.version} available"),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    if (progress != null) "Загрузка… ${(progress * 100).toInt()}%" else "Нажмите, чтобы скачать",
+                    if (progress != null) tr("Загрузка… ${(progress * 100).toInt()}%", "Downloading… ${(progress * 100).toInt()}%") else tr("Нажмите, чтобы скачать", "Tap to download"),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
             IconButton(onClick = { state.dismissUpdate() }) {
-                AppIcon(AppIcons.Close, contentDescription = "Скрыть", modifier = Modifier.size(18.dp))
+                AppIcon(AppIcons.Close, contentDescription = tr("Скрыть", "Hide"), modifier = Modifier.size(18.dp))
             }
         }
     }

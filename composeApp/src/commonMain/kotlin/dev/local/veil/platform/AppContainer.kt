@@ -1,6 +1,7 @@
 package dev.local.veil.platform
 
 import dev.local.veil.core.AppSettings
+import dev.local.veil.core.GeoAssetSource
 import dev.local.veil.core.ProxyConfig
 import dev.local.veil.core.Subscription
 import dev.local.veil.core.TunnelOptions
@@ -85,6 +86,10 @@ data class SubscriptionUsage(
 data class SubscriptionFetch(
     val body: String,
     val usage: SubscriptionUsage? = null,
+    val title: String = "",
+    val description: String = "",
+    val supportUrl: String = "",
+    val webUrl: String = "",
 )
 
 interface SubscriptionFetcher {
@@ -96,6 +101,13 @@ interface SubscriptionFetcher {
      * или полный конфиг с маршрутами. Выбор UA — это выбор формата.
      */
     var userAgent: String
+}
+
+/** geoip.dat / geosite.dat для правил geosite:/geoip:. */
+interface GeoService {
+    val directory: String
+    val hasAssets: Boolean
+    suspend fun download(source: GeoAssetSource): Result<Unit>
 }
 
 /** Доступ к логам ядра из интерфейса. */
@@ -131,6 +143,7 @@ interface AppContainer {
     val store: ServerStore
     val settings: SettingsStore
     val geoDirectory: String
+    val geo: GeoService
     val subscriptions: SubscriptionFetcher
     val packages: PackageLister
     val pinger: Pinger

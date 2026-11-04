@@ -3,6 +3,7 @@ package dev.local.veil.platform
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import android.content.Context
+import android.content.res.Configuration
 import android.net.VpnService
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,6 +43,10 @@ class AndroidVpnController(
     private val settingsStore: SettingsStore,
 ) : VpnController {
 
+    private val isTelevision =
+        (activity.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
+            Configuration.UI_MODE_TYPE_TELEVISION
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _status = MutableStateFlow(VpnStatus())
     override val status: StateFlow<VpnStatus> = _status.asStateFlow()
@@ -77,7 +82,10 @@ class AndroidVpnController(
 
     override suspend fun connect(server: ProxyConfig, options: TunnelOptions): Result<Unit> =
         runCatching {
-            val effective = if (logFile.isNotEmpty()) options.copy(logFile = logFile) else options
+            val effective = options.copy(
+                logFile = if (logFile.isNotEmpty()) logFile else options.logFile,
+                geoAvailable = hasGeoAssets(),
+            )
             val engine = engineFor(server, effective)
             val config = configFor(server, effective, engine)
             if (!coreAvailable) error("ядро не подключено к сборке")
@@ -106,6 +114,12 @@ class AndroidVpnController(
                 engine = engine,
             )
         }
+
+    /** Есть ли в каталоге ядра geoip.dat и geosite.dat. */
+    private fun hasGeoAssets(): Boolean {
+        fun present(name: String) = java.io.File(geoDirectory, name).let { it.exists() && it.length() > 0 }
+        return present("geoip.dat") && present("geosite.dat")
+    }
 
     /** Каким ядром поднимать узел: AUTO выбирает по протоколу и транспорту. */
     private fun engineFor(server: ProxyConfig, options: TunnelOptions): CoreEngine =
@@ -148,7 +162,11 @@ class AndroidVpnController(
             // Пробное ядро пишет в отдельный файл: два экземпляра в одном
             // файле мешали бы друг другу.
             val probeLog = logFile.takeIf { it.isNotEmpty() }?.let { "$it.probe" }
-            val effective = options.copy(logFile = probeLog, logLevel = "debug")
+            val effective = options.copy(
+                logFile = probeLog,
+                logLevel = "debug",
+                geoAvailable = hasGeoAssets(),
+            )
             val engine = engineFor(server, effective)
             if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) return@withContext null
             val port = 21000 + (System.nanoTime() % 500).toInt()
@@ -258,7 +276,10 @@ class AndroidVpnController(
         runCatching {
             if (!coreAvailable) error("ядро не подключено к сборке")
 
-            val effective = if (logFile.isNotEmpty()) options.copy(logFile = logFile) else options
+            val effective = options.copy(
+                logFile = if (logFile.isNotEmpty()) logFile else options.logFile,
+                geoAvailable = hasGeoAssets(),
+            )
             val engine = engineFor(server, effective)
             if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) {
                 error("Для ${server.proto.wire} нужно ядро sing-box — оно ещё не подключено к сборке")
@@ -334,7 +355,9 @@ class AndroidVpnController(
             var lastDown = 0L
             var lastAt = 0L
             while (isActive) {
-                delay(1000)
+                // На ТВ скорость счётчиков не нужна каждую секунду: более
+                // редкий тик заметно снижает лишние Compose-перерисовки.
+                delay(if (isTelevision) 2000 else 1000)
                 val up = upTotal()
                 val down = downTotal()
                 val now = System.currentTimeMillis()
@@ -438,6 +461,7 @@ class AndroidContainer(activity: ComponentActivity) : AppContainer {
     override val transfer: TransferService = AndroidTransferService(activity.applicationContext)
     override val update: UpdateService = AndroidUpdateService(activity.applicationContext)
     override val geoDirectory: String = geoDir
+    override val geo: GeoService = AndroidGeoService(File(geoDir))
     override val subscriptions: SubscriptionFetcher = AndroidSubscriptionFetcher(activity.applicationContext)
     override val packages: PackageLister = AndroidPackageLister(activity.applicationContext)
     override val pinger: Pinger = AndroidPinger()

@@ -55,7 +55,7 @@ fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
                 val address = url
                 when {
                     failed -> Text(
-                        "Нет подключения к локальной сети. Подключитесь к Wi-Fi или Ethernet и откройте экран снова.",
+                        tr("Нет подключения к локальной сети. Подключитесь к Wi-Fi или Ethernet и откройте экран снова.", "No local network connection. Connect to Wi-Fi or Ethernet and open this screen again."),
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(24.dp),
@@ -78,15 +78,15 @@ fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
         val infoBlock: @Composable (Modifier) -> Unit = { blockModifier ->
             Column(blockModifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    "Перенос с телефона",
+                    tr("Перенос с телефона", "Transfer from phone"),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.staggerIn(seen, "title", 1),
                 )
                 val steps = listOf(
-                    "Откройте Veil на телефоне.",
-                    "Нажмите «+», затем «Сканировать QR-код».",
-                    "Наведите камеру на этот код и подтвердите отправку.",
+                    tr("Откройте Veil на телефоне.", "Open Veil on your phone."),
+                    tr("Нажмите «+», затем «Сканировать QR-код».", "Tap “+” then “Scan QR code”."),
+                    tr("Наведите камеру на этот код и подтвердите отправку.", "Point the camera at this code and confirm the transfer."),
                 )
                 steps.forEachIndexed { index, step ->
                     Row(
@@ -110,14 +110,14 @@ fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
                     }
                 }
                 Text(
-                    "Нет Veil на телефоне? Откройте адрес под кодом камерой: в браузере появится страница, " +
-                        "куда можно вставить ссылку на подписку.",
+                    tr("Нет Veil на телефоне? Откройте адрес под кодом камерой: в браузере появится страница, ", "No Veil on your phone? Scan the address below the code with your camera: a page will open in the browser ") +
+                        tr("куда можно вставить ссылку на подписку.", "where you can paste a subscription link."),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.staggerIn(seen, "alt", 5),
                 )
                 Text(
-                    "Передача идёт только внутри вашей сети Wi-Fi, адрес действует, пока открыт этот экран.",
+                    tr("Передача идёт только внутри вашей сети Wi-Fi, адрес действует, пока открыт этот экран.", "Transfer stays inside your Wi-Fi network; the address is valid while this screen is open."),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.staggerIn(seen, "note", 6),
@@ -125,7 +125,7 @@ fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
                 if (url != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ExpressiveLoader(diameter = 22.dp)
-                        Text("Ждём телефон…", style = MaterialTheme.typography.labelLarge)
+                        Text(tr("Ждём телефон…", "Waiting for phone…"), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }

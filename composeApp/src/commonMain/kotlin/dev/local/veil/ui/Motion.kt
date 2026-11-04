@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 /** Пружинное вдавливание при нажатии — характерная физика Expressive. */
 @Composable
 internal fun pressScale(source: MutableInteractionSource, pressed: Float = 0.95f): Float {
+    if (LocalTvMode.current) return 1f
     val isPressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (isPressed) pressed else 1f,
@@ -40,6 +41,7 @@ internal fun pressScale(source: MutableInteractionSource, pressed: Float = 0.95f
  */
 @Composable
 internal fun Modifier.staggerIn(seen: MutableSet<Any>, key: Any, index: Int): Modifier {
+    if (LocalTvMode.current) return this
     val already = remember { key in seen }
     val progress = remember { Animatable(if (already) 1f else 0f) }
     LaunchedEffect(Unit) {
