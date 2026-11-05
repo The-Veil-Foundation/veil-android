@@ -1,6 +1,8 @@
 package singbox
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.os.Build
 import android.net.TrafficStats
 import android.os.Process
 import libbox.BoxService
@@ -17,6 +19,7 @@ import libbox.TunOptions
 import libbox.WIFIState
 import java.io.File
 import java.io.FileOutputStream
+import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -167,17 +170,43 @@ object Singbox {
 
         override fun usePlatformAutoDetectInterfaceControl(): Boolean = false
 
+        /**
+         * Владелец соединения — для правил `package_name` (на macOS это
+         * `process_name`). Работает с Android 10: активному VPN-приложению
+         * система отдаёт uid по кортежу соединения.
+         */
         override fun findConnectionOwner(
             ipProtocol: Int,
             sourceAddress: String,
             sourcePort: Int,
             destinationAddress: String,
             destinationPort: Int,
-        ): Int = -1
+        ): Int {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) error("android: connection owner needs API 29")
+            val ctx = context ?: error("android: no context")
+            val connectivity = ctx.getSystemService(ConnectivityManager::class.java)
+            val uid = connectivity.getConnectionOwnerUid(
+                ipProtocol,
+                InetSocketAddress(sourceAddress, sourcePort),
+                InetSocketAddress(destinationAddress, destinationPort),
+            )
+            if (uid == Process.INVALID_UID) error("android: connection owner not found")
+            return uid
+        }
 
-        override fun packageNameByUid(uid: Int): String? = null
+        override fun packageNameByUid(uid: Int): String {
+            val ctx = context ?: error("android: no context")
+            return ctx.packageManager.getPackagesForUid(uid)?.firstOrNull()
+                ?: error("android: package for uid $uid not found")
+        }
 
-        override fun uidByPackageName(packageName: String): Int = -1
+        override fun uidByPackageName(packageName: String): Int {
+            val ctx = context ?: error("android: no context")
+            return runCatching {
+                @Suppress("DEPRECATION")
+                ctx.packageManager.getApplicationInfo(packageName, 0).uid
+            }.getOrDefault(-1)
+        }
 
         // Сознательно не отдаём sing-box сетевые интерфейсы: привязка сокета
         // к rmnet_data0/wlan0 на Android уводит его в собственный TUN и даёт

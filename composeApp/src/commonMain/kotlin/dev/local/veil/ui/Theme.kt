@@ -115,10 +115,70 @@ fun OrbitTheme(
     // (публичен только в androidx-сборке), поэтому берём MaterialTheme и
     // добавляем экспрессивность сами: формы, типографика и Motion.kt.
     MaterialTheme(
-        colorScheme = scheme,
+        colorScheme = animatedColorScheme(scheme),
         typography = orbitTypography(),
         shapes = orbitShapes(),
         content = content,
+    )
+}
+
+/**
+ * Плавная смена темы: каждый цвет схемы перетекает к новому значению, а не
+ * переключается кадром. На слабых устройствах — мгновенно.
+ */
+@Composable
+private fun animatedColorScheme(target: ColorScheme): ColorScheme {
+    val spec: androidx.compose.animation.core.AnimationSpec<androidx.compose.ui.graphics.Color> =
+        if (dev.local.veil.platform.isLowRamDevice()) {
+            androidx.compose.animation.core.snap()
+        } else {
+            androidx.compose.animation.core.tween(
+                durationMillis = 200,
+                easing = androidx.compose.animation.core.LinearOutSlowInEasing,
+            )
+        }
+
+    @Composable
+    fun animate(color: androidx.compose.ui.graphics.Color) =
+        androidx.compose.animation.animateColorAsState(color, spec, label = "theme").value
+
+    return target.copy(
+        primary = animate(target.primary),
+        onPrimary = animate(target.onPrimary),
+        primaryContainer = animate(target.primaryContainer),
+        onPrimaryContainer = animate(target.onPrimaryContainer),
+        inversePrimary = animate(target.inversePrimary),
+        secondary = animate(target.secondary),
+        onSecondary = animate(target.onSecondary),
+        secondaryContainer = animate(target.secondaryContainer),
+        onSecondaryContainer = animate(target.onSecondaryContainer),
+        tertiary = animate(target.tertiary),
+        onTertiary = animate(target.onTertiary),
+        tertiaryContainer = animate(target.tertiaryContainer),
+        onTertiaryContainer = animate(target.onTertiaryContainer),
+        background = animate(target.background),
+        onBackground = animate(target.onBackground),
+        surface = animate(target.surface),
+        onSurface = animate(target.onSurface),
+        surfaceVariant = animate(target.surfaceVariant),
+        onSurfaceVariant = animate(target.onSurfaceVariant),
+        surfaceTint = animate(target.surfaceTint),
+        inverseSurface = animate(target.inverseSurface),
+        inverseOnSurface = animate(target.inverseOnSurface),
+        error = animate(target.error),
+        onError = animate(target.onError),
+        errorContainer = animate(target.errorContainer),
+        onErrorContainer = animate(target.onErrorContainer),
+        outline = animate(target.outline),
+        outlineVariant = animate(target.outlineVariant),
+        scrim = animate(target.scrim),
+        surfaceBright = animate(target.surfaceBright),
+        surfaceDim = animate(target.surfaceDim),
+        surfaceContainer = animate(target.surfaceContainer),
+        surfaceContainerHigh = animate(target.surfaceContainerHigh),
+        surfaceContainerHighest = animate(target.surfaceContainerHighest),
+        surfaceContainerLow = animate(target.surfaceContainerLow),
+        surfaceContainerLowest = animate(target.surfaceContainerLowest),
     )
 }
 

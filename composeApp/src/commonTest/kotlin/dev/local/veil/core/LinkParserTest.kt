@@ -335,7 +335,8 @@ class SubscriptionPayloadTest {
     @Test
     fun bypassRuRoutesRussianDomainsDirect() {
         val node = LinkParser.parse("trojan://pw@a.example.com:443#DE")
-        val config = XrayConfig.build(node, dev.local.veil.core.TunnelOptions(bypassRu = true))
+        val options = AppSettings(routingPreset = RoutingPreset.BYPASS_RU).toTunnelOptions()
+        val config = XrayConfig.build(node, options)
         val rules = config["routing"]!!.jsonObject["rules"]!!.jsonArray.map { it.jsonObject }
 
         val ruRule = rules.firstOrNull { rule ->

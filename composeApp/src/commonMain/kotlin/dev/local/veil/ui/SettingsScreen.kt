@@ -53,6 +53,8 @@ fun SettingsScreen(
     val settings = state.settings
     val clipboard = LocalClipboardManager.current
     var showAbout by remember { mutableStateOf(false) }
+    var confirmNewHwid by remember { mutableStateOf(false) }
+    var editingHwid by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -61,101 +63,11 @@ fun SettingsScreen(
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        /* ---------------- Обновления ---------------- */
+        /* ---------------- Подключение ---------------- */
 
         SettingsGroup(
-            title = tr("Обновления", "Updates"),
-            icon = AppIcons.Update,
-            rows = listOf(
-                {
-                    SegmentAction(
-                        title = tr("Проверить обновления", "Check for updates"),
-                        subtitle = tr("Версия ${state.appVersion} · GitHub Releases", "Version ${state.appVersion} · GitHub Releases"),
-                        onClick = { state.checkUpdates() },
-                    )
-                },
-            ),
-        )
-
-        /* ---------------- Оформление ---------------- */
-
-        SettingsGroup(
-            title = tr("Оформление", "Appearance"),
-            icon = AppIcons.Moon,
-            rows = listOf(
-                {
-                    SegmentChoice(
-                        title = tr("Язык", "Language"),
-                        subtitle = tr("Язык интерфейса", "Interface language"),
-                        options = dev.local.veil.core.AppLanguage.entries.map { language ->
-                            val label = if (language == dev.local.veil.core.AppLanguage.SYSTEM) {
-                                tr("Системный", "System")
-                            } else {
-                                language.nativeLabel
-                            }
-                            SegmentOption(label, settings.language == language) {
-                                state.saveSettings(settings.copy(language = language))
-                            }
-                        },
-                    )
-                },
-                {
-                    SegmentChoice(
-                        title = tr("Тема", "Theme"),
-                        subtitle = tr("Светлая, тёмная или как в системе", "Light, dark or follow the system"),
-                        options = Appearance.entries.map { appearance ->
-                            SegmentOption(appearanceTitle(appearance), settings.appearance == appearance) {
-                                state.saveSettings(settings.copy(appearance = appearance))
-                            }
-                        },
-                    )
-                },
-                {
-                    SegmentSwitch(
-                        title = "Pitch Black",
-                        subtitle = tr("Чёрный фон для OLED", "Pure black background for OLED"),
-                        checked = settings.pitchBlack,
-                        onCheckedChange = { state.saveSettings(settings.copy(pitchBlack = it)) },
-                    )
-                },
-            ),
-        )
-
-        /* ---------------- Диагностика ---------------- */
-
-        SettingsGroup(
-            title = tr("Диагностика", "Diagnostics"),
-            icon = AppIcons.Tuning,
-            rows = listOf(
-                {
-                    SegmentAction(
-                        title = tr("Логи ядра", "Core logs"),
-                        subtitle = tr("Просмотр и копирование", "View and copy"),
-                        onClick = onOpenLogs,
-                    )
-                },
-                {
-                    SegmentAction(
-                        title = tr("Проверить соединение", "Test connection"),
-                        subtitle = tr("Проверить выбранный узел", "Test the selected server"),
-                        onClick = { state.checkConnection() },
-                    )
-                },
-                {
-                    SegmentAction(
-                        title = tr("О приложении", "About"),
-                        subtitle = tr("Версия, ядро, исходники", "Version, core, sources"),
-                        onClick = { showAbout = true },
-                    )
-                },
-            ),
-        )
-
-        /* ---------------- Туннель ---------------- */
-
-        SettingsGroup(
-            title = tr("Туннель", "Tunnel"),
-            icon = AppIcons.Global,
+            title = tr("Подключение", "Connection"),
+            icon = AppIcons.Power,
             rows = listOf(
                 {
                     SegmentSwitch(
@@ -163,61 +75,28 @@ fun SettingsScreen(
                         subtitle = tr("Сразу поднимать туннель к выбранному узлу", "Bring the tunnel up to the selected server"),
                         checked = settings.autoConnect,
                         onCheckedChange = { state.saveSettings(settings.copy(autoConnect = it)) },
+                        icon = AppIcons.Power,
                     )
                 },
                 {
-                    SegmentChoice(
-                        title = tr("Уровень лога", "Log level"),
-                        subtitle = tr("Подробность диагностики ядра", "Core diagnostics verbosity"),
-                        options = listOf(
-                            "error" to tr("Ошибки", "Errors"),
-                            "warning" to tr("Предупреждения", "Warnings"),
-                            "info" to tr("Инфо", "Info"),
-                            "debug" to tr("Отладка", "Debug"),
-                        ).map { (value, label) ->
-                            SegmentOption(label, settings.logLevel == value) {
-                                state.saveSettings(settings.copy(logLevel = value))
-                            }
+                    SegmentAction(
+                        title = tr("Раздельный туннель", "Split tunneling"),
+                        subtitle = when (settings.splitMode) {
+                            SplitMode.OFF -> tr("Выключен — весь трафик в VPN", "Off — all traffic goes through the VPN")
+                            SplitMode.EXCLUDE -> tr("Все, кроме ${settings.splitPackages.size} прил.", "All except ${settings.splitPackages.size} apps")
+                            SplitMode.INCLUDE -> tr("Только ${settings.splitPackages.size} прил.", "Only ${settings.splitPackages.size} apps")
                         },
-                    )
-                },
-                {
-                    SegmentChoice(
-                        title = "MTU",
-                        subtitle = tr("Размер пакета", "Packet size"),
-                        options = listOf(1280, 1400, 1500).map { mtu ->
-                            SegmentOption("$mtu", settings.mtu == mtu) {
-                                state.saveSettings(settings.copy(mtu = mtu))
-                            }
-                        },
+                        onClick = onOpenSplit,
+                        icon = AppIcons.Devices,
                     )
                 },
                 {
                     SegmentSwitch(
-                        title = tr("IPv6 в туннеле", "IPv6 in tunnel"),
-                        subtitle = tr("IPv6 пойдёт мимо VPN", "IPv6 will bypass the VPN"),
-                        checked = settings.ipv6,
-                        onCheckedChange = { state.saveSettings(settings.copy(ipv6 = it)) },
-                    )
-                },
-                {
-                    SegmentInput(
-                        value = settings.dns.joinToString(", "),
-                        onValueChange = { raw ->
-                            state.saveSettings(
-                                settings.copy(
-                                    dns = raw.split(',').map { it.trim() }.filter { it.isNotEmpty() },
-                                ),
-                            )
-                        },
-                        label = "DNS",
-                    )
-                },
-                {
-                    SegmentInput(
-                        value = settings.userAgent,
-                        onValueChange = { state.saveSettings(settings.copy(userAgent = it)) },
-                        label = tr("User-Agent подписки", "Subscription User-Agent"),
+                        title = tr("Уведомление в шторке", "Notification in the shade"),
+                        subtitle = tr("Состояние VPN и быстрые действия", "VPN status and quick actions"),
+                        checked = settings.liveNotification,
+                        onCheckedChange = { state.saveSettings(settings.copy(liveNotification = it)) },
+                        icon = AppIcons.Bell,
                     )
                 },
             ),
@@ -232,49 +111,39 @@ fun SettingsScreen(
                 {
                     SegmentSwitch(
                         title = tr("Фрагментация TLS", "TLS fragmentation"),
-                        subtitle = tr("Дробление ClientHello, обход DPI", "Split ClientHello to evade DPI"),
+                        subtitle = tr("Дробит ClientHello, чтобы DPI не резал рукопожатие", "Splits ClientHello so DPI cannot cut the handshake"),
                         checked = settings.fragment,
                         onCheckedChange = { state.saveSettings(settings.copy(fragment = it)) },
+                        icon = AppIcons.ShieldCheck,
                     )
                 },
                 {
                     SegmentSwitch(
-                        title = tr("Российские домены напрямую", "Russian domains direct"),
-                        subtitle = tr(".ru, .su, .рф — мимо туннеля", ".ru, .su, .рф bypass the tunnel"),
-                        checked = settings.bypassRu,
-                        onCheckedChange = { state.saveSettings(settings.copy(bypassRu = it)) },
+                        // Ярлык к пресету «Bypass Russia» из «Маршрутизации».
+                        title = tr("Россия напрямую", "Bypass Russia"),
+                        subtitle = tr(
+                            "Пресет маршрутизации. Остальные — во вкладке «Маршрут».",
+                            "A routing preset. The others live in the Routing tab.",
+                        ),
+                        checked = settings.routingPreset == dev.local.veil.core.RoutingPreset.BYPASS_RU,
+                        onCheckedChange = { on ->
+                            val preset = if (on) {
+                                dev.local.veil.core.RoutingPreset.BYPASS_RU
+                            } else {
+                                dev.local.veil.core.RoutingPreset.BYPASS_LAN
+                            }
+                            state.saveRouting(preset, settings.customRules, settings.blockAds)
+                        },
+                        icon = AppIcons.Routing,
                     )
                 },
             ),
         )
 
-        /* ---------------- Раздельный туннель ---------------- */
+        /* ---------------- Подписки ---------------- */
 
         SettingsGroup(
-            title = tr("Раздельный туннель", "Split tunneling"),
-            icon = AppIcons.Devices,
-            rows = listOf(
-                {
-                    SegmentAction(
-                        title = when (settings.splitMode) {
-                            SplitMode.OFF -> tr("Выключен", "Off")
-                            SplitMode.EXCLUDE -> tr("Все, кроме ${settings.splitPackages.size} прил.", "All except ${settings.splitPackages.size} apps")
-                            SplitMode.INCLUDE -> tr("Только ${settings.splitPackages.size} прил.", "Only ${settings.splitPackages.size} apps")
-                        },
-                        subtitle = when (settings.splitMode) {
-                            SplitMode.OFF -> tr("Весь трафик идёт в VPN", "All traffic goes through the VPN")
-                            else -> tr("Выбрать приложения", "Choose apps")
-                        },
-                        onClick = onOpenSplit,
-                    )
-                },
-            ),
-        )
-
-        /* ---------------- Подписка ---------------- */
-
-        SettingsGroup(
-            title = tr("Подписка", "Subscription"),
+            title = tr("Подписки", "Subscriptions"),
             icon = AppIcons.Cloud,
             rows = listOf(
                 {
@@ -284,8 +153,9 @@ fun SettingsScreen(
                         } else {
                             tr("Подписок: ${state.subscriptions.size}", "Subscriptions: ${state.subscriptions.size}")
                         },
-                        subtitle = tr("Обновление, добавление, удаление", "Refresh, add, remove"),
+                        subtitle = tr("Обновить, добавить, удалить", "Refresh, add, remove"),
                         onClick = onOpenSubscriptions,
+                        icon = AppIcons.Layers,
                     )
                 },
                 {
@@ -294,12 +164,121 @@ fun SettingsScreen(
                         subtitle = tr("Как часто обновлять при запуске", "How often to refresh on launch"),
                         options = listOf(0, 6, 12, 24).map { hours ->
                             SegmentOption(
-                                if (hours == 0) tr("выкл", "off") else tr("${hours}ч", "${hours}h"),
+                                if (hours == 0) tr("выкл", "off") else tr("${hours} ч", "${hours} h"),
                                 settings.autoRefreshHours == hours,
                             ) {
                                 state.saveSettings(settings.copy(autoRefreshHours = hours))
                             }
                         },
+                        icon = AppIcons.Refresh,
+                    )
+                },
+                {
+                    SegmentAction(
+                        title = tr("Принять с другого устройства", "Receive from another device"),
+                        subtitle = tr("QR-код для переноса подписок", "QR code to transfer subscriptions"),
+                        onClick = onOpenReceive,
+                        icon = AppIcons.Qr,
+                    )
+                },
+                {
+                    UserAgentInput(
+                        stored = settings.userAgent,
+                        onCommit = { state.saveSettings(state.settings.copy(userAgent = it)) },
+                    )
+                },
+            ),
+        )
+
+        /* ---------------- Устройство (HWID) ---------------- */
+
+        SettingsGroup(
+            title = tr("Устройство", "Device"),
+            icon = AppIcons.Transfer,
+            rows = buildList<@Composable () -> Unit> {
+                add {
+                    SegmentSwitch(
+                        title = tr("Отправлять HWID", "Send HWID"),
+                        subtitle = tr("Нужен провайдерам, которые считают устройства", "Needed by providers that count devices"),
+                        checked = settings.sendHwid,
+                        onCheckedChange = { state.saveSettings(state.settings.copy(sendHwid = it)) },
+                        icon = AppIcons.Shield,
+                    )
+                }
+                if (settings.sendHwid) {
+                    add {
+                        SegmentAction(
+                            title = tr("ID устройства", "Device ID"),
+                            subtitle = state.deviceId + " · " + tr("нажмите, чтобы скопировать", "tap to copy"),
+                            onClick = {
+                                clipboard.setText(AnnotatedString(state.deviceId))
+                                state.showBulletin(tr("ID скопирован", "ID copied"), BulletinKind.SUCCESS)
+                            },
+                            icon = AppIcons.Copy,
+                        )
+                    }
+                    add {
+                        SegmentAction(
+                            title = tr("Новый ID", "New ID"),
+                            subtitle = tr("Для провайдера это новое устройство", "Your provider will see a new device"),
+                            onClick = { confirmNewHwid = true },
+                            icon = AppIcons.Refresh,
+                        )
+                    }
+                    add {
+                        SegmentAction(
+                            title = tr("Задать вручную", "Set by hand"),
+                            subtitle = tr("ID, который выдал провайдер", "The ID your provider issued"),
+                            onClick = { editingHwid = true },
+                            icon = AppIcons.Edit,
+                        )
+                    }
+                }
+            },
+        )
+
+        /* ---------------- Оформление ---------------- */
+
+        SettingsGroup(
+            title = tr("Оформление", "Appearance"),
+            icon = AppIcons.Moon,
+            rows = listOf(
+                {
+                    SegmentChoice(
+                        title = tr("Тема", "Theme"),
+                        subtitle = tr("Светлая, тёмная или как в системе", "Light, dark or follow the system"),
+                        options = Appearance.entries.map { appearance ->
+                            SegmentOption(appearanceTitle(appearance), settings.appearance == appearance) {
+                                state.saveSettings(state.settings.copy(appearance = appearance))
+                            }
+                        },
+                        icon = AppIcons.Moon,
+                    )
+                },
+                {
+                    SegmentSwitch(
+                        title = "Pitch Black",
+                        subtitle = tr("Чёрный фон для OLED", "Pure black background for OLED"),
+                        checked = settings.pitchBlack,
+                        onCheckedChange = { state.saveSettings(state.settings.copy(pitchBlack = it)) },
+                        icon = AppIcons.EyeOff,
+                    )
+                },
+                {
+                    SegmentChoice(
+                        title = tr("Язык", "Language"),
+                        subtitle = tr("Язык интерфейса", "Interface language"),
+                        options = dev.local.veil.core.AppLanguage.entries.map { language ->
+                            val label = if (language == dev.local.veil.core.AppLanguage.SYSTEM) {
+                                tr("Системный", "System")
+                            } else {
+                                language.nativeLabel
+                            }
+                            SegmentOption(label, settings.language == language) {
+                                state.saveSettings(state.settings.copy(language = language))
+                            }
+                        },
+                        icon = AppIcons.Global,
                     )
                 },
             ),
@@ -320,77 +299,151 @@ fun SettingsScreen(
                                 state.choosePingMode(mode)
                             }
                         },
+                        icon = AppIcons.Stopwatch,
                     )
                 },
             ),
         )
 
-        /* ---------------- Уведомления ---------------- */
+        /* ---------------- Сеть туннеля ---------------- */
 
         SettingsGroup(
-            title = tr("Уведомления", "Notifications"),
-            icon = AppIcons.Bell,
+            title = tr("Сеть туннеля", "Tunnel network"),
+            icon = AppIcons.Tuning,
             rows = listOf(
                 {
                     SegmentSwitch(
-                        title = tr("Показывать в шторке", "Show in notification shade"),
-                        subtitle = tr("Состояние VPN и быстрые действия", "VPN status and quick actions"),
-                        checked = settings.liveNotification,
-                        onCheckedChange = { state.saveSettings(settings.copy(liveNotification = it)) },
-                    )
-                },
-            ),
-        )
-
-        /* ---------------- Перенос ---------------- */
-
-        SettingsGroup(
-            title = tr("Перенос", "Transfer"),
-            icon = AppIcons.Qr,
-            rows = listOf(
-                {
-                    SegmentAction(
-                        title = tr("Принять с другого устройства", "Receive from another device"),
-                        subtitle = tr("QR-код для переноса подписок", "QR code to transfer subscriptions"),
-                        onClick = onOpenReceive,
-                    )
-                },
-            ),
-        )
-
-        /* ---------------- Устройство ---------------- */
-
-        SettingsGroup(
-            title = tr("Устройство", "Device"),
-            icon = AppIcons.Box,
-            rows = listOf(
-                { SegmentInfo(tr("ID устройства", "Device ID"), state.deviceId.take(18) + "…") },
-                {
-                    SegmentAction(
-                        title = tr("Копировать ID", "Copy ID"),
-                        subtitle = tr("Для панелей, которые требуют HWID", "For panels that require HWID"),
-                        onClick = {
-                            clipboard.setText(AnnotatedString(state.deviceId))
-                            state.showBulletin(tr("ID скопирован", "ID copied"), BulletinKind.SUCCESS)
+                        title = "IPv6",
+                        subtitle = if (settings.ipv6) {
+                            tr("IPv6 идёт через VPN", "IPv6 goes through the VPN")
+                        } else {
+                            tr("Выключено: IPv6 пойдёт мимо VPN", "Off: IPv6 bypasses the VPN")
                         },
+                        checked = settings.ipv6,
+                        onCheckedChange = { state.saveSettings(state.settings.copy(ipv6 = it)) },
+                        icon = AppIcons.Global,
+                    )
+                },
+                {
+                    SegmentChoice(
+                        title = "MTU",
+                        subtitle = tr("Размер пакета в туннеле", "Packet size in the tunnel"),
+                        options = listOf(1280, 1400, 1500).map { mtu ->
+                            SegmentOption("$mtu", settings.mtu == mtu) {
+                                state.saveSettings(state.settings.copy(mtu = mtu))
+                            }
+                        },
+                        icon = AppIcons.Tuning,
+                    )
+                },
+                {
+                    ListInput(
+                        values = settings.dns,
+                        label = tr("DNS, если свой DNS в «Маршруте» выключен", "DNS when custom DNS in Routing is off"),
+                        onCommit = { state.saveSettings(state.settings.copy(dns = it)) },
                     )
                 },
             ),
         )
 
-        /* ---------------- Состояние ---------------- */
+        /* ---------------- Диагностика ---------------- */
 
         SettingsGroup(
-            title = tr("Состояние", "Status"),
+            title = tr("Диагностика", "Diagnostics"),
+            icon = AppIcons.Note,
+            rows = listOf(
+                {
+                    SegmentAction(
+                        title = tr("Проверить соединение", "Test connection"),
+                        subtitle = tr("Проверить выбранный узел", "Test the selected server"),
+                        onClick = { state.checkConnection() },
+                        icon = AppIcons.ShieldCheck,
+                    )
+                },
+                {
+                    SegmentAction(
+                        title = tr("Логи ядра", "Core logs"),
+                        subtitle = tr("Туннель: ${status.phase.label}", "Tunnel: ${status.phase.label}"),
+                        onClick = onOpenLogs,
+                        icon = AppIcons.Note,
+                    )
+                },
+                {
+                    SegmentChoice(
+                        title = tr("Уровень лога", "Log level"),
+                        subtitle = tr("Подробность диагностики ядра", "Core diagnostics verbosity"),
+                        options = listOf(
+                            "error" to tr("Ошибки", "Errors"),
+                            "warning" to tr("Предупреждения", "Warnings"),
+                            "info" to tr("Инфо", "Info"),
+                            "debug" to tr("Отладка", "Debug"),
+                        ).map { (value, label) ->
+                            SegmentOption(label, settings.logLevel == value) {
+                                state.saveSettings(state.settings.copy(logLevel = value))
+                            }
+                        },
+                        icon = AppIcons.Filter,
+                    )
+                },
+            ),
+        )
+
+        /* ---------------- О приложении ---------------- */
+
+        SettingsGroup(
+            title = tr("О приложении", "About"),
             icon = AppIcons.Info,
             rows = listOf(
-                { SegmentInfo(tr("Профилей", "Profiles"), state.servers.size.toString()) },
-                { SegmentInfo(tr("Туннель", "Tunnel"), status.phase.label) },
-                { SegmentInfo(tr("Лог", "Log"), "files/xray.log") },
+                {
+                    SegmentAction(
+                        title = tr("Проверить обновления", "Check for updates"),
+                        subtitle = tr("Версия ${state.appVersion} · GitHub Releases", "Version ${state.appVersion} · GitHub Releases"),
+                        onClick = { state.checkUpdates() },
+                        icon = AppIcons.Update,
+                    )
+                },
+                {
+                    SegmentAction(
+                        title = "Veil",
+                        subtitle = tr("Версия, ядро, исходники", "Version, core, sources"),
+                        onClick = { showAbout = true },
+                        icon = AppIcons.Info,
+                    )
+                },
             ),
         )
 
         Spacer(Modifier.height(20.dp))
+    }
+
+    if (confirmNewHwid) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmNewHwid = false },
+            title = { Text(tr("Выпустить новый ID?", "Issue a new ID?"), fontWeight = FontWeight.Black) },
+            text = { Text(tr("Провайдер увидит новое устройство: оно может занять ещё один слот, а старое останется в списке панели.", "Your provider will see a new device: it may take another slot, and the old one stays in the panel's list.")) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmNewHwid = false
+                    state.regenerateDeviceId()
+                }) { Text(tr("Новый ID", "New ID")) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmNewHwid = false }) { Text(tr("Отмена", "Cancel")) }
+            },
+        )
+    }
+
+    if (editingHwid) {
+        TextDialog(
+            title = tr("ID устройства", "Device ID"),
+            initial = state.deviceId,
+            placeholder = state.deviceId,
+            hint = tr("Можно поправить текущий или вставить ID от провайдера. Буквы станут заглавными.", "Edit the current one or paste the ID your provider issued. Letters become uppercase."),
+            onDismiss = { editingHwid = false },
+            onSave = { value ->
+                if (state.setDeviceId(value)) editingHwid = false
+            },
+        )
     }
 
     if (showAbout) {
@@ -405,7 +458,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        "Туннель: ${if (status.isConnected) "поднят" else tr("выключен", "off")}",
+                        tr("Туннель: ${status.phase.label}", "Tunnel: ${status.phase.label}"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -455,4 +508,43 @@ fun SettingsScreen(
             },
         )
     }
+}
+
+/**
+ * Поле со списком через запятую. Текст живёт локально и сохраняется разобранным:
+ * иначе каждое нажатие пересобирало бы строку и съедало запятую с пробелом —
+ * второй адрес было не ввести.
+ */
+@Composable
+private fun ListInput(values: List<String>, label: String, onCommit: (List<String>) -> Unit) {
+    var text by remember { mutableStateOf(values.joinToString(", ")) }
+    SegmentInput(
+        value = text,
+        onValueChange = { raw ->
+            text = raw
+            val parsed = raw.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }
+            // Пустой список оставил бы туннель без резолвера — храним последний рабочий.
+            if (parsed.isNotEmpty()) onCommit(parsed)
+        },
+        label = label,
+    )
+}
+
+/**
+ * User-Agent подписки. В поле всегда видно то, что реально уйдёт в запросе.
+ * Значение по умолчанию (или пустое поле) хранится как "", чтобы UA шёл за
+ * версией приложения; всё остальное — свой выбор пользователя.
+ */
+@Composable
+private fun UserAgentInput(stored: String, onCommit: (String) -> Unit) {
+    var text by remember { mutableStateOf(dev.local.veil.core.effectiveUserAgent(stored)) }
+    SegmentInput(
+        value = text,
+        onValueChange = { raw ->
+            text = raw
+            val trimmed = raw.trim()
+            onCommit(if (trimmed == dev.local.veil.AppVersion.USER_AGENT) "" else trimmed)
+        },
+        label = tr("User-Agent подписки", "Subscription User-Agent"),
+    )
 }

@@ -149,6 +149,13 @@ data class ProxyConfig(
             (allowedIPs.any { it.trim() == "0.0.0.0/0" } && allowedIPs.any { it.trim() == "::/0" })
 
     val isUsable: Boolean get() = proto.xraySupported
+
+    /**
+     * Узел-заглушка: панели кладут в подписку строки-объявления с адресом
+     * 0.0.0.0 или портом 0. Подключаться к ним и проверять их бессмысленно.
+     */
+    val isPlaceholder: Boolean
+        get() = address.trim().lowercase() in PLACEHOLDER_HOSTS || port <= 0
 }
 
 /** Короткий стабильный идентификатор вместо UUID. */
@@ -158,3 +165,5 @@ fun newId(): String {
         repeat(16) { append(chars[Random.nextInt(16)]) }
     }
 }
+
+private val PLACEHOLDER_HOSTS = setOf("", "0.0.0.0", "::", "[::]", "127.0.0.1", "localhost")

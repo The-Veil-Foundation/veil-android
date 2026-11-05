@@ -193,7 +193,7 @@ git clone https://github.com/The-Veil-Foundation/veil-android.git && cd veil-and
 <summary>Релизы и подпись</summary>
 
 Релизы собираются **вручную**: *Actions → Release → Run workflow*, с тегом вроде `v0.1.1`,
-который должен совпадать с `versionName`. На push и теги ничего не запускается. Проверка
+который должен совпадать с файлом `VERSION` (единственный источник версии). На push и теги ничего не запускается. Проверка
 сборки без релиза — так же через *Actions → CI*.
 
 Сплиты по ABI включаются флагом `-PabiSplits`, поэтому обычный `assembleDebug` собирает один

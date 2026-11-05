@@ -378,6 +378,15 @@ fun ServerActionsSheet(
                         subtitle = tr("Имя, заметка, теги, скрытие", "Name, note, tags, visibility"),
                     ) { sheet.close { editingNote = true } },
                 )
+                if (server.source != null) {
+                    add(
+                        SheetAction(
+                            icon = AppIcons.Edit,
+                            title = tr("Дублировать во «Вручную»", "Duplicate into Manual"),
+                            subtitle = tr("Копию можно менять, подписка не тронется", "The copy is yours to change; the subscription stays as is"),
+                        ) { sheet.close { state.duplicateToManual(server) } },
+                    )
+                }
                 if (link != null) {
                     add(SheetAction(AppIcons.Qr, tr("QR-код", "QR code"), tr("Перенести на другое устройство", "Transfer to another device")) {
                         sheet.navigate(SheetPage.QR)
@@ -417,6 +426,7 @@ fun ServerActionsSheet(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
+                        colors = veilFieldColors(),
                         value = name,
                         onValueChange = { name = it },
                         label = { Text(tr("Своё имя", "Custom name")) },
@@ -426,6 +436,7 @@ fun ServerActionsSheet(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
+                        colors = veilFieldColors(),
                         value = note,
                         onValueChange = { note = it },
                         label = { Text(tr("Заметка", "Note")) },
@@ -434,6 +445,7 @@ fun ServerActionsSheet(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
+                        colors = veilFieldColors(),
                         value = tags,
                         onValueChange = { tags = it },
                         label = { Text(tr("Теги через запятую", "Tags separated by commas")) },
@@ -592,9 +604,7 @@ fun SubscriptionActionsSheet(
         details = null,
         buildActions = { sheet ->
             buildList {
-                add(SheetAction(AppIcons.Stopwatch, tr("Проверить пинг группы", "Ping group"), tr("Метод: ${state.pingMode.label}", "Method: ${pingModeTitle(state.pingMode)}")) {
-                    sheet.close { state.pingSource(source) }
-                })
+                // Пинг группы и сворачивание — уже кнопки на самой карточке, здесь не дублируем.
                 if (source != null) {
                     add(SheetAction(AppIcons.Refresh, tr("Обновить подписку", "Refresh subscription")) {
                         sheet.close {
@@ -614,12 +624,6 @@ fun SubscriptionActionsSheet(
                         sheet.close { state.share(source) }
                     })
                 }
-                add(
-                    SheetAction(
-                        icon = if (collapsed) AppIcons.ChevronDown else AppIcons.ChevronUp,
-                        title = if (collapsed) tr("Развернуть список", "Expand list") else tr("Свернуть список", "Collapse list"),
-                    ) { sheet.close(onToggleCollapse) },
-                )
                 if (source != null) {
                     add(
                         SheetAction(

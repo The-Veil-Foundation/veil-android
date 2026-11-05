@@ -46,6 +46,19 @@ interface VpnController {
      */
     suspend fun realPing(server: ProxyConfig, options: TunnelOptions, timeoutMs: Int = 4000): Int? = null
 
+    /**
+     * Реальная задержка для многих узлов сразу. Результат по каждому узлу
+     * приходит в [report] по мере готовности. По умолчанию — по одному.
+     */
+    suspend fun realPingBatch(
+        servers: List<ProxyConfig>,
+        options: TunnelOptions,
+        timeoutMs: Int = 3000,
+        report: suspend (id: String, ms: Int?) -> Unit,
+    ) {
+        servers.forEach { report(it.id, realPing(it, options, timeoutMs)) }
+    }
+
     suspend fun connect(server: ProxyConfig, options: TunnelOptions): Result<Unit>
     suspend fun disconnect()
     suspend fun resume() {}
@@ -93,9 +106,17 @@ data class SubscriptionFetch(
 )
 
 interface SubscriptionFetcher {
-    suspend fun fetch(url: String): Result<SubscriptionFetch>
-    /** Стабильный идентификатор устройства, если панель его спрашивает. */
+    /**
+     * [userAgent] — свой UA источника; null или пусто — общий [userAgent].
+     * [hwid] — что слать в `X-Hwid`: null — не слать вовсе.
+     */
+    suspend fun fetch(url: String, userAgent: String? = null, hwid: String? = deviceId): Result<SubscriptionFetch>
+    /** Идентификатор устройства для панелей (HWID), 16 hex-символов как на macOS. */
     val deviceId: String
+    /** Выпускает новый HWID: для панели это новое устройство. */
+    fun regenerateDeviceId(): String
+    /** Ставит HWID, выданный провайдером, как есть (только без пробелов по краям). */
+    fun setDeviceId(raw: String): String?
     /**
      * Панели отдают разный формат в зависимости от клиента: список ссылок
      * или полный конфиг с маршрутами. Выбор UA — это выбор формата.
@@ -107,7 +128,8 @@ interface SubscriptionFetcher {
 interface GeoService {
     val directory: String
     val hasAssets: Boolean
-    suspend fun download(source: GeoAssetSource): Result<Unit>
+    /** [customGeoip]/[customGeosite] — адреса для [GeoAssetSource.CUSTOM]. */
+    suspend fun download(source: GeoAssetSource, customGeoip: String = "", customGeosite: String = ""): Result<Unit>
 }
 
 /** Доступ к логам ядра из интерфейса. */

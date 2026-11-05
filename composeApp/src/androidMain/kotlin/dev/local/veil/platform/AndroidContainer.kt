@@ -16,6 +16,9 @@ import dev.local.veil.core.XrayInbound
 import dev.local.veil.core.XrayConfig
 import dev.local.veil.core.xrayCompatible
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -89,11 +92,16 @@ class AndroidVpnController(
         }
     }
 
+    /** Секрет Clash API sing-box: новый на каждый запуск, как на macOS. */
+    private val clashSecret: String =
+        java.math.BigInteger(128, java.security.SecureRandom()).toString(16)
+
     override suspend fun connect(server: ProxyConfig, options: TunnelOptions): Result<Unit> =
         runCatching {
             val effective = options.copy(
                 logFile = if (logFile.isNotEmpty()) logFile else options.logFile,
                 geoAvailable = hasGeoAssets(),
+                clashSecret = clashSecret,
             )
             val engine = engineFor(server, effective)
             val config = configFor(server, effective, engine)
@@ -171,7 +179,7 @@ class AndroidVpnController(
             // Пробное ядро пишет в отдельный файл: два экземпляра в одном
             // файле мешали бы друг другу.
             val probeLog = logFile.takeIf { it.isNotEmpty() }?.let { "$it.probe" }
-            val effective = options.copy(
+            val effective = options.forProbe().copy(
                 logFile = probeLog,
                 logLevel = "debug",
                 geoAvailable = hasGeoAssets(),
@@ -246,6 +254,131 @@ class AndroidVpnController(
         }
 
     /**
+     * Реальный пинг пачкой, как ProxyProbe на macOS: одно пробное ядро на
+     * [dev.local.veil.core.PingBatch.CHUNK] узлов, по SOCKS-входу на узел,
+     * запросы параллельно. Узлы с готовым конфигом из подписки мерятся по
+     * одному — у них своя топология выходов.
+     */
+    override suspend fun realPingBatch(
+        servers: List<ProxyConfig>,
+        options: TunnelOptions,
+        timeoutMs: Int,
+        report: suspend (id: String, ms: Int?) -> Unit,
+    ) {
+        if (!coreAvailable) {
+            servers.forEach { report(it.id, null) }
+            return
+        }
+        val effective = options.forProbe().copy(
+            logFile = null,
+            logLevel = "warning",
+            geoAvailable = hasGeoAssets(),
+        )
+        val (batchable, single) = servers.partition { dev.local.veil.core.PingBatch.batchable(it) }
+        val byEngine = batchable.groupBy { engineFor(it, effective) }
+        for ((engine, nodes) in byEngine) {
+            if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) {
+                nodes.forEach { report(it.id, null) }
+                continue
+            }
+            for (chunk in nodes.chunked(dev.local.veil.core.PingBatch.CHUNK)) {
+                pingChunk(chunk, engine, effective, timeoutMs, report)
+            }
+        }
+        single.forEach { report(it.id, realPing(it, options, timeoutMs)) }
+    }
+
+    private suspend fun pingChunk(
+        nodes: List<ProxyConfig>,
+        engine: CoreEngine,
+        options: TunnelOptions,
+        timeoutMs: Int,
+        report: suspend (id: String, ms: Int?) -> Unit,
+    ) {
+        val results = probeMutex.withLock {
+            withContext(Dispatchers.IO) {
+                val ports = freeLoopbackPorts(nodes.size)
+                if (ports.size != nodes.size) return@withContext null
+                val rnd = java.security.SecureRandom()
+                val user = "p" + java.math.BigInteger(64, rnd).toString(16)
+                val pass = java.math.BigInteger(128, rnd).toString(16)
+                val config = runCatching {
+                    when (engine) {
+                        CoreEngine.SING_BOX -> dev.local.veil.core.PingBatch.singbox(nodes, ports, user, pass, options).toString()
+                        else -> resolveEndpoints(
+                            dev.local.veil.core.PingBatch.xray(nodes, ports, user, pass, options).toString(),
+                            dump = false,
+                        )
+                    }
+                }.onFailure { android.util.Log.w("VeilXray", "конфиг пинга не собрался: ${it.message}") }
+                    .getOrNull() ?: return@withContext null
+                try {
+                    val started = if (engine == CoreEngine.SING_BOX) {
+                        SingboxBridge.startProbe(config, geoDirectory)
+                    } else {
+                        XrayBridge.startProbe(config, geoDirectory)
+                    }
+                    started.onFailure { android.util.Log.w("VeilXray", "ядро пинга не поднялось: ${it.message}") }
+                        .getOrElse { return@withContext null }
+                    java.net.Authenticator.setDefault(object : java.net.Authenticator() {
+                        override fun getPasswordAuthentication() =
+                            java.net.PasswordAuthentication(user, pass.toCharArray())
+                    })
+                    waitForListener(ports.last(), 3000)
+                    val semaphore = kotlinx.coroutines.sync.Semaphore(12)
+                    kotlinx.coroutines.coroutineScope {
+                        nodes.mapIndexed { index, node ->
+                            async {
+                                semaphore.withPermit {
+                                    // Первый запрос платит за рукопожатие, второй — чистый RTT.
+                                    val cold = requestThroughSocks(ports[index], timeoutMs)
+                                    val ms = if (cold == null) null else requestThroughSocks(ports[index], timeoutMs) ?: cold
+                                    report(node.id, ms)
+                                    node.id
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                } finally {
+                    java.net.Authenticator.setDefault(null)
+                    if (engine == CoreEngine.SING_BOX) {
+                        runCatching { SingboxBridge.stopProbe() }
+                    } else {
+                        runCatching { XrayBridge.stopProbe() }
+                    }
+                }
+            }
+        }
+        if (results == null) nodes.forEach { report(it.id, null) }
+    }
+
+    /** Свободные порты loopback: сокеты держим, пока не выбраны все, чтобы порты не повторились. */
+    private fun freeLoopbackPorts(count: Int): List<Int> {
+        val sockets = ArrayList<java.net.ServerSocket>()
+        return try {
+            repeat(count) {
+                sockets += java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+            }
+            sockets.map { it.localPort }
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            sockets.forEach { runCatching { it.close() } }
+        }
+    }
+
+    private suspend fun waitForListener(port: Int, timeoutMs: Long) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val ok = runCatching {
+                java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", port), 200) }
+            }.isSuccess
+            if (ok) return
+            delay(40)
+        }
+    }
+
+    /**
      * Запрос через локальный SOCKS. Возвращает время до ответа в мс,
      * null — не получилось. Любой HTTP-ответ значит, что узел живой.
      */
@@ -288,6 +421,7 @@ class AndroidVpnController(
             val effective = options.copy(
                 logFile = if (logFile.isNotEmpty()) logFile else options.logFile,
                 geoAvailable = hasGeoAssets(),
+                clashSecret = clashSecret,
             )
             val engine = engineFor(server, effective)
             if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) {

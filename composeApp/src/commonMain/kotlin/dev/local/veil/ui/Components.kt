@@ -516,11 +516,51 @@ fun BulletinHost(
     }
 }
 
-fun formatBytes(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes " + tr("Б", "B")
-    bytes < 1024 * 1024 -> "${bytes / 1024} " + tr("КБ", "KB")
-    bytes < 1024L * 1024 * 1024 -> "${bytes / (1024 * 1024)} " + tr("МБ", "MB")
-    else -> "${bytes / (1024L * 1024 * 1024)} " + tr("ГБ", "GB")
+fun formatBytes(bytes: Long): String {
+    val kb = 1024.0
+    val mb = kb * 1024
+    val gb = mb * 1024
+    val tb = gb * 1024
+    fun scaled(value: Double, unit: String): String {
+        // Одна цифра после запятой, пока она что-то значит: «12,4 ГБ», но «240 ГБ».
+        val text = if (value < 100) {
+            val tenths = kotlin.math.round(value * 10).toLong()
+            val separator = if (AppLocale.language == dev.local.veil.core.AppLanguage.EN) "." else ","
+            if (tenths % 10 == 0L) "${tenths / 10}" else "${tenths / 10}$separator${tenths % 10}"
+        } else {
+            kotlin.math.round(value).toLong().toString()
+        }
+        return "$text $unit"
+    }
+    return when {
+        bytes < 1024 -> "$bytes " + tr("Б", "B")
+        bytes < mb -> scaled(bytes / kb, tr("КБ", "KB"))
+        bytes < gb -> scaled(bytes / mb, tr("МБ", "MB"))
+        bytes < tb -> scaled(bytes / gb, tr("ГБ", "GB"))
+        else -> scaled(bytes / tb, tr("ТБ", "TB"))
+    }
+}
+
+/** Русское множественное число: 1 день, 2 дня, 5 дней. */
+fun ruPlural(n: Long, one: String, few: String, many: String): String {
+    val mod100 = n % 100
+    val mod10 = n % 10
+    return when {
+        mod100 in 11..14 -> many
+        mod10 == 1L -> one
+        mod10 in 2..4 -> few
+        else -> many
+    }
+}
+
+/** Сколько осталось до конца подписки: «37 дней», «5 ч», «истекла». */
+fun formatRemaining(epochSeconds: Long, now: Long = currentTimeMillis()): String {
+    val seconds = epochSeconds - now / 1000
+    if (seconds <= 0) return tr("истекла", "expired")
+    val days = seconds / 86400
+    if (days >= 1) return tr("осталось $days ${ruPlural(days, "день", "дня", "дней")}", if (days == 1L) "1 day left" else "$days days left")
+    val hours = (seconds / 3600).coerceAtLeast(1)
+    return tr("осталось $hours ч", "$hours h left")
 }
 
 /** Скорость: до сотни КБ/с — в килобайтах, дальше в мегабитах. */

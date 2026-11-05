@@ -16,6 +16,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
@@ -88,6 +90,7 @@ import dev.local.veil.platform.VpnPhase
 import dev.local.veil.platform.isLowRamDevice
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -107,13 +110,26 @@ fun App(container: AppContainer) {
     val scope = rememberCoroutineScope()
     val state = remember(container) { VeilState(container, scope) }
     val status by container.vpn.status.collectAsState()
+    // Composable-вызов безусловный: если звать isSystemInDarkTheme() только в
+    // ветке SYSTEM, смена темы меняет структуру групп, и Compose сбрасывает
+    // всё состояние ниже — вкладка прыгала на «Серверы».
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val darkTheme = when (state.settings.appearance) {
         dev.local.veil.core.Appearance.LIGHT -> false
         dev.local.veil.core.Appearance.DARK -> true
-        dev.local.veil.core.Appearance.SYSTEM ->
-            if (state.isTv) true else androidx.compose.foundation.isSystemInDarkTheme()
+        dev.local.veil.core.Appearance.SYSTEM -> state.isTv || systemDark
     }
-    SystemBarsAppearance(darkTheme = darkTheme || state.settings.pitchBlack)
+
+    // Навигация живёт выше обёрток темы и языка: их смена не должна
+    // пересоздавать экран, на котором стоит пользователь.
+    var tab by remember { mutableStateOf(Tab.SERVERS) }
+    var showSplit by remember { mutableStateOf(false) }
+    var showAdd by remember { mutableStateOf(false) }
+    // Поиск серверов живёт в верхней панели; null — поле закрыто.
+    var serverQuery by remember { mutableStateOf<String?>(null) }
+    var showQr by remember { mutableStateOf(false) }
+    var showLogs by remember { mutableStateOf(false) }
+    var showReceive by remember { mutableStateOf(false) }
 
     val language = when (state.settings.language) {
         dev.local.veil.core.AppLanguage.SYSTEM -> systemLanguage()
@@ -122,16 +138,15 @@ fun App(container: AppContainer) {
 
     ProvideLanguage(language) {
     OrbitTheme(darkTheme = darkTheme, pitchBlack = state.settings.pitchBlack) {
+    // Иконки статус-бара идут за анимированным фоном, а не за выбором темы:
+    // иначе на время перехода тёмные иконки ложатся на ещё тёмный фон.
+    SystemBarsAppearance(
+        darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f,
+    )
     TvIndicationProvider(state.isTv) {
         val reduceMotion = isLowRamDevice()
         CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
 
-        var tab by remember { mutableStateOf(Tab.SERVERS) }
-        var showSplit by remember { mutableStateOf(false) }
-        var showAdd by remember { mutableStateOf(false) }
-        var showQr by remember { mutableStateOf(false) }
-        var showLogs by remember { mutableStateOf(false) }
-        var showReceive by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
             delay(900)
@@ -155,9 +170,10 @@ fun App(container: AppContainer) {
 
         // Жест «назад» сначала закрывает шторку/вложенный экран и возвращает
         // на «Серверы», и только потом выпускает из приложения.
-        PlatformBackHandler(enabled = showQr || showAdd || showLogs || showSplit || showReceive || tab != Tab.SERVERS) {
+        PlatformBackHandler(enabled = showQr || showAdd || showLogs || showSplit || showReceive || serverQuery != null || tab != Tab.SERVERS) {
             when {
                 showQr -> showQr = false
+                serverQuery != null && tab == Tab.SERVERS -> serverQuery = null
                 showAdd -> showAdd = false
                 showLogs -> showLogs = false
                 showSplit -> showSplit = false
@@ -185,7 +201,7 @@ fun App(container: AppContainer) {
                 if (hours > 0) {
                     val refreshNow = currentTimeMillis()
                     state.subscriptions
-                        .filter { refreshNow - it.lastFetched > hours * 3_600_000L }
+                        .filter { it.autoUpdate && refreshNow - it.lastFetched > hours * 3_600_000L }
                         .forEach { state.refreshSubscription(it) }
                 }
             }
@@ -236,8 +252,9 @@ fun App(container: AppContainer) {
                     },
                 )
                 .then(
-                    if (!state.isTv) Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
-                    else Modifier,
+                    // Верхняя панель не сворачивается: подключение уезжает вместе
+                    // со списком, а сверху его заменяет компактная полоса.
+                    Modifier,
                 ),
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
@@ -295,12 +312,34 @@ fun App(container: AppContainer) {
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.background,
                         ),
-                        scrollBehavior = scrollBehavior,
                         title = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                VeilMark(34.dp)
-                                Spacer(Modifier.size(10.dp))
-                                Text("Veil", fontWeight = FontWeight.Black)
+                            val query = serverQuery
+                            if (query != null) {
+                                SearchPill(
+                                    query = query,
+                                    onQueryChange = { serverQuery = it },
+                                    autoFocus = true,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                )
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    VeilMark(34.dp)
+                                    Spacer(Modifier.size(10.dp))
+                                    Text("Veil", fontWeight = FontWeight.Black)
+                                }
+                            }
+                        },
+                        actions = {
+                            if (!state.isTv && state.servers.isNotEmpty()) {
+                                if (serverQuery != null) {
+                                    IconButton(onClick = { serverQuery = null }) {
+                                        AppIcon(AppIcons.Close, contentDescription = tr("Закрыть поиск", "Close search"))
+                                    }
+                                } else {
+                                    IconButton(onClick = { serverQuery = "" }) {
+                                        AppIcon(AppIcons.Search, contentDescription = tr("Поиск", "Search"))
+                                    }
+                                }
                             }
                         },
                     )
@@ -340,7 +379,7 @@ fun App(container: AppContainer) {
             },
             floatingActionButton = {
                 AnimatedVisibility(
-                    visible = !showSplit && !showReceive && (tab == Tab.SERVERS || tab == Tab.SUBS),
+                    visible = !showSplit && !showReceive && ((tab == Tab.SERVERS && state.servers.isNotEmpty()) || (tab == Tab.SUBS && (state.servers.isNotEmpty() || state.subscriptions.isNotEmpty()))),
                     enter = scaleIn(tween(180)) + fadeIn(),
                     exit = scaleOut() + fadeOut(),
                 ) {
@@ -390,17 +429,12 @@ fun App(container: AppContainer) {
                         if (state.isTv) {
                             return@AnimatedContent EnterTransition.None togetherWith ExitTransition.None
                         }
-                        // Соседние вкладки: короткий слайд без отскока.
-                        val forward = targetState.ordinal > initialState.ordinal
-                        val shift = { full: Int -> if (forward) full / 7 else -full / 7 }
-                        (slideInHorizontally(
-                            animationSpec = tween(220),
-                            initialOffsetX = shift,
-                        ) + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(
-                                animationSpec = tween(180),
-                                targetOffsetX = { full -> -shift(full) },
-                            ) + fadeOut(tween(180)))
+                        // M3 fade through для нижней навигации: старый экран быстро
+                        // гаснет, новый проявляется после него с лёгким масштабом.
+                        // Два экрана не просвечивают друг сквозь друга — нет «мыла».
+                        (fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+                            scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.96f)) togetherWith
+                            fadeOut(tween(90, easing = FastOutLinearInEasing))
                     },
                     label = "tab",
                 ) { current ->
@@ -412,8 +446,16 @@ fun App(container: AppContainer) {
                             modifier = modifier,
                             now = now,
                             onOpenReceive = { showReceive = true },
+                            onAdd = { showAdd = true },
+                            query = serverQuery.orEmpty(),
                         )
-                        Tab.SUBS -> SubscriptionsScreen(state = state, modifier = modifier.fillMaxSize())
+                        Tab.SUBS -> SubscriptionsScreen(
+                            state = state,
+                            status = status,
+                            modifier = modifier.fillMaxSize(),
+                            onAdd = { showAdd = true },
+                            onOpenReceive = { showReceive = true },
+                        )
                         Tab.ROUTING -> RoutingScreen(state = state, modifier = modifier)
                         Tab.SETTINGS -> SettingsScreen(
                             state = state,
@@ -484,12 +526,9 @@ fun App(container: AppContainer) {
 
         val addSheet: @Composable () -> Unit = {
             AddSheet(
-                busy = state.busy,
-                onAdd = { text ->
-                    state.addInput(text)
-                    showAdd = false
-                },
-                onCancel = { showAdd = false },
+                state = state,
+                onDone = { showAdd = false },
+                onCancel = if (state.isTv) ({ showAdd = false }) else null,
                 // На приставке камеры нет — там вместо сканера приём по QR.
                 onScan = if (qrSupported && !state.isTv) {
                     { showQr = true }
@@ -523,103 +562,6 @@ fun App(container: AppContainer) {
     }
     }
 }
-
-@Composable
-private fun AddSheet(
-    busy: Boolean,
-    onAdd: (String) -> Unit,
-    onCancel: () -> Unit,
-    onScan: (() -> Unit)? = null,
-    onReceive: (() -> Unit)? = null,
-) {
-    var text by remember { mutableStateOf("") }
-    val tv = LocalTvMode.current
-    val textFocus = remember { FocusRequester() }
-    LaunchedEffect(tv) {
-        if (tv) {
-            delay(400)
-            runCatching { textFocus.requestFocus() }
-        }
-    }
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            // В альбомной ориентации лист ниже экрана: без прокрутки кнопки
-            // «Сканировать QR-код» и «Принять» просто обрезались.
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(tr("Добавить", "Add"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(170.dp)
-                .focusRequester(textFocus),
-            shape = RoundedCornerShape(20.dp),
-            label = { Text(tr("Ссылка на подписку или share-ссылки", "Subscription link or share links")) },
-            placeholder = { Text("https://subs.example.com/…\n\nvless://…\nvmess://…\nss://…") },
-        )
-
-        RowButtons(busy = busy, enabled = text.isNotBlank(), onAdd = { onAdd(text) }, onCancel = onCancel)
-
-        if (onScan != null) {
-            OutlinedButton(
-                onClick = onScan,
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                AppIcon(AppIcons.Qr, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(8.dp))
-                Text(tr("Сканировать QR-код", "Scan QR code"))
-            }
-        }
-
-        if (onReceive != null) {
-            OutlinedButton(
-                onClick = onReceive,
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                AppIcon(AppIcons.Qr, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(8.dp))
-                Text(tr("Принять с другого устройства", "Receive from another device"))
-            }
-        }
-
-        Text(
-            text = tr("Ссылка, base64 или конфиг Xray.", "Link, base64 or Xray config."),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun RowButtons(
-    busy: Boolean,
-    enabled: Boolean,
-    onAdd: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(
-            onClick = onAdd,
-            enabled = enabled && !busy,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier
-                .weight(1f)
-                .height(52.dp),
-        ) { Text(if (busy) tr("Загружаю…", "Loading…") else tr("Добавить", "Add"), fontWeight = FontWeight.Bold) }
-        TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text(tr("Отмена", "Cancel")) }
-    }
-}
-
-
 
 /** Нижняя навигация: Solar-иконки, выбранная чуть крупнее — без подпрыгивания. */
 @Composable

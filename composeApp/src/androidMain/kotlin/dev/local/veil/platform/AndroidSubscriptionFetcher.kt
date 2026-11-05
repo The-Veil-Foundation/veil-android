@@ -20,29 +20,48 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
 
     private val prefs = context.getSharedPreferences("veil", Context.MODE_PRIVATE)
 
-    override val deviceId: String by lazy {
-        prefs.getString(KEY_HWID, null) ?: run {
-            val generated = UUID.randomUUID().toString().replace("-", "").take(16)
-            prefs.edit().putString(KEY_HWID, generated).apply()
-            generated
+    /**
+     * HWID в верхнем регистре, как на macOS. Значение старых сборок (нижний
+     * регистр) переводится один раз и записывается обратно.
+     */
+    override val deviceId: String
+        get() {
+            val stored = prefs.getString(KEY_HWID, null)?.takeIf { it.isNotBlank() } ?: return regenerateDeviceId()
+            val upper = stored.uppercase()
+            if (upper != stored) prefs.edit().putString(KEY_HWID, upper).apply()
+            return upper
         }
+
+    override fun regenerateDeviceId(): String {
+        val minted = dev.local.veil.core.DeviceIds.mint()
+        prefs.edit().putString(KEY_HWID, minted).apply()
+        return minted
+    }
+
+    override fun setDeviceId(raw: String): String? {
+        val value = dev.local.veil.core.DeviceIds.normalizedManual(raw) ?: return null
+        prefs.edit().putString(KEY_HWID, value).apply()
+        return value
     }
 
     override var userAgent: String
-        get() = prefs.getString(KEY_UA, null) ?: DEFAULT_UA
+        get() = dev.local.veil.core.effectiveUserAgent(prefs.getString(KEY_UA, null))
         set(value) {
-            prefs.edit().putString(KEY_UA, value.ifBlank { DEFAULT_UA }).apply()
+            // Пусто — «по умолчанию»: не храним, чтобы UA шёл за версией приложения.
+            val custom = value.trim().takeUnless { it.isEmpty() || it in dev.local.veil.core.LEGACY_DEFAULT_USER_AGENTS }
+            prefs.edit().apply { if (custom == null) remove(KEY_UA) else putString(KEY_UA, custom) }.apply()
         }
 
-    override suspend fun fetch(url: String): Result<SubscriptionFetch> = withContext(Dispatchers.IO) {
+    override suspend fun fetch(url: String, userAgent: String?, hwid: String?): Result<SubscriptionFetch> = withContext(Dispatchers.IO) {
+        val agent = userAgent?.trim()?.takeIf { it.isNotEmpty() } ?: this@AndroidSubscriptionFetcher.userAgent
         runCatching {
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 20_000
                 readTimeout = 60_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", userAgent)
+                setRequestProperty("User-Agent", agent)
                 setRequestProperty("Accept", "*/*")
-                setRequestProperty("X-Hwid", deviceId)
+                if (hwid != null) setRequestProperty("X-Hwid", hwid)
                 setRequestProperty("X-Device-OS", "Android")
                 setRequestProperty("X-Device-Model", Build.MODEL ?: "Android")
                 setRequestProperty("X-Ver-OS", Build.VERSION.RELEASE ?: "")
@@ -128,6 +147,5 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
     private companion object {
         const val KEY_HWID = "hwid"
         const val KEY_UA = "user_agent"
-        const val DEFAULT_UA = "Veil/0.1"
     }
 }

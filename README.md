@@ -197,7 +197,7 @@ and merged into the same AAR (no script for that is in the repo yet).
 <summary>Releases and signing</summary>
 
 Releases are built **manually**: *Actions → Release → Run workflow*, with a tag such as
-`v0.1.1` that must match `versionName`. Nothing runs on push or tags. A build-only check
+`v0.1.1` that must match the `VERSION` file (the single source of the app version). Nothing runs on push or tags. A build-only check
 runs the same way via *Actions → CI*.
 
 ABI splits are enabled with `-PabiSplits`, so a plain `assembleDebug` still builds one APK.

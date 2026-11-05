@@ -13,7 +13,6 @@ object SingboxConfig {
     const val TAG_PROXY = "proxy"
     const val TAG_DIRECT = "direct"
     const val TAG_BLOCK = "block"
-    const val TAG_DNS_OUT = "dns-out"
 
     /** Куда sing-box смотрит за трафиком: рабочий TUN или локальный SOCKS для проверки. */
     sealed interface Inbound {
@@ -33,6 +32,18 @@ object SingboxConfig {
         val dnsSettings = options.dnsSettings?.takeIf { it.enabled }?.sanitized()
         val balancer = options.balancerMembers
         val useBalancer = balancer.size > 1
+        val graph = OutboundGraph.build(
+            rules = options.rules,
+            servers = options.servers,
+            groups = options.groups,
+            capable = { it.singboxCompatible },
+        )
+        val rules = options.rules.filter { it.enabled }
+        val tun = inbound is Inbound.Tun
+        // `clash_mode` читает режим у Clash API, поэтому API включается сам,
+        // как только он нужен хоть одному правилу. Только в туннеле и только
+        // с секретом: иначе любое приложение на телефоне видит соединения.
+        val clashApi = tun && options.clashSecret.isNotBlank() && rules.any { it.clashMode.isNotBlank() }
 
         return buildJsonObject {
             put("log", logJson(options))
@@ -50,7 +61,7 @@ object SingboxConfig {
                                     if (entry.kind.needsPath && entry.path.isNotBlank()) put("path", entry.path)
                                 }
                                 if (entry.detour.isNotBlank() && entry.detour != TAG_DIRECT) {
-                                    put("detour", entry.detour)
+                                    put("detour", graph.detourTag(entry.detour))
                                 }
                                 if (entry.strategy.isNotBlank()) put("strategy", entry.strategy)
                             }
@@ -58,10 +69,7 @@ object SingboxConfig {
                     }
                     putJsonArray("rules") {
                         dnsSettings.rules.filter { it.enabled && it.hasMatcher }.forEach { rule ->
-                            addJsonObject {
-                                putJsonArray("domain") { rule.domains.forEach { add(it) } }
-                                put("server", if (rule.reject) TAG_BLOCK else rule.serverTag)
-                            }
+                            dnsRule(rule)?.let { add(it) }
                         }
                     }
                     put("final", dnsSettings.finalTag)
@@ -87,9 +95,9 @@ object SingboxConfig {
                         put("type", "tun")
                         put("tag", "tun-in")
                         put("interface_name", inbound.name)
-                        put("inet4_address", "172.19.0.1/30")
-                        if (options.ipv6) {
-                            put("inet6_address", "fdfe:dcba:9876::1/126")
+                        putJsonArray("address") {
+                            add("172.19.0.1/30")
+                            if (options.ipv6) add("fdfe:dcba:9876::1/126")
                         }
                         put("mtu", inbound.mtu)
                         // TUN создаёт VpnService (маршруты, DNS и split-tunnel
@@ -129,6 +137,8 @@ object SingboxConfig {
                 } else {
                     add(outbound(cfg, TAG_PROXY))
                 }
+                graph.servers.forEach { server -> add(outbound(server, ProfileTags.server(server.id))) }
+                graph.groups.forEach { (group, members) -> add(groupOutbound(group, members)) }
                 addJsonObject {
                     put("type", "direct")
                     put("tag", TAG_DIRECT)
@@ -137,55 +147,156 @@ object SingboxConfig {
                     put("type", "block")
                     put("tag", TAG_BLOCK)
                 }
-                addJsonObject {
-                    put("type", "dns")
-                    put("tag", TAG_DNS_OUT)
-                }
             }
 
             putJsonObject("route") {
                 putJsonArray("rules") {
-                    // DNS queries
-                    addJsonObject {
-                        put("protocol", "dns")
-                        put("outbound", TAG_DNS_OUT)
-                    }
-
-                    // Пользовательские и пресетные правила — раньше общих.
-                    options.rules.forEach { rule -> rule.singboxRule()?.let { add(it) } }
-
-                    // Private networks
-                    addJsonObject {
-                        putJsonArray("ip_cidr") {
-                            PRIVATE_NETWORKS.forEach { add(it) }
-                        }
-                        put("outbound", TAG_DIRECT)
-                    }
-
-                    // Russian domains bypass
-                    if (options.bypassRu) {
+                    // Сниффинг с 1.12 — действие правила; первым он нужен, чтобы
+                    // доменные правила работали и для соединений по голому IP.
+                    addJsonObject { put("action", "sniff") }
+                    if (tun) {
                         addJsonObject {
-                            putJsonArray("domain_suffix") {
-                                add(".ru")
-                                add(".su")
-                                add(".рф")
-                            }
-                            put("outbound", TAG_DIRECT)
+                            put("protocol", "dns")
+                            put("action", "hijack-dns")
                         }
                     }
+                    rules.forEach { rule -> routeRule(rule, graph)?.let { add(it) } }
+                }
+                put("final", TAG_PROXY)
+                // DNS-правила говорят на том же диалекте: `geosite:` там тоже
+                // требует объявленного rule-set, иначе ядро не стартует.
+                // Наборы качаются через прокси: без них ядро не стартует, а
+                // raw.githubusercontent.com напрямую доступен не везде.
+                // Скачанное хранит cache_file, и следующие старты сеть не ждут.
+                val sets = RuleSetCatalog.derive(
+                    rules = rules,
+                    dnsRules = dnsSettings?.rules.orEmpty(),
+                    explicit = options.ruleSets,
+                    downloadDetour = TAG_PROXY,
+                ).mapNotNull { it.json() }
+                if (sets.isNotEmpty()) put("rule_set", JsonArray(sets))
+                // С 1.12 выходу с доменным адресом нужен резолвер по умолчанию.
+                if (dnsSettings != null) put("default_domain_resolver", dnsSettings.bootstrapTag)
+                // Не привязываем сокеты к конкретному интерфейсу: на Android
+                // SO_BINDTODEVICE без root часто даёт "dial rmnet_data0: i/o timeout".
+                // Приложение и так исключено из собственного VPN, поэтому обычный
+                // маршрут ОС — правильный путь наружу.
+                put("auto_detect_interface", false)
+            }
 
-                    // Default: everything through proxy
-                    addJsonObject {
-                        put("outbound", TAG_PROXY)
+            if (tun) {
+                putJsonObject("experimental") {
+                    // Кэш rule-set и выборов селекторов. Только у туннеля: два
+                    // экземпляра на одном bbolt-файле ждали бы блокировку.
+                    putJsonObject("cache_file") { put("enabled", true) }
+                    if (clashApi) {
+                        putJsonObject("clash_api") {
+                            put("external_controller", "127.0.0.1:9090")
+                            put("default_mode", "rule")
+                            put("secret", options.clashSecret)
+                        }
                     }
                 }
-                // Не привязываем сокеты к конкретному интерфейсу: на Android
-            // SO_BINDTODEVICE без root часто даёт "dial rmnet_data0: i/o timeout".
-            // Приложение и так исключено из собственного VPN, поэтому обычный
-            // маршрут ОС — правильный путь наружу.
-            put("auto_detect_interface", false)
             }
         }
+    }
+
+    /**
+     * Одно правило как route-правило sing-box, или null, если матчить нечего.
+     * Цель, выход которой не построен, падает на `proxy`: правило просило
+     * прокси, не хватает лишь названного узла или группы.
+     */
+    fun routeRule(rule: RoutingRule, graph: OutboundGraph? = null): JsonObject? {
+        if (!rule.enabled || !rule.hasMatcher) return null
+        val tag = graph?.tagFor(rule.target)
+            ?: if (rule.target.needsProfile) TAG_PROXY else rule.target.tag()
+        val ruleSetTags = rule.ruleSets.toMutableList()
+        val sourceSide = rule.direction == RuleDirection.SOURCE
+        val matchers = buildJsonObject {
+            val domains = MatcherSyntax.domains(rule.domains)
+            stringArray("domain", domains.exact)
+            stringArray("domain_suffix", domains.suffix)
+            stringArray("domain_keyword", domains.keyword)
+            stringArray("domain_regex", domains.regex)
+            ruleSetTags += domains.ruleSetTags
+
+            val ips = MatcherSyntax.ips(rule.ips)
+            stringArray(if (sourceSide) "source_ip_cidr" else "ip_cidr", ips.cidrs)
+            if (ips.isPrivate) put(if (sourceSide) "source_ip_is_private" else "ip_is_private", true)
+            ruleSetTags += ips.ruleSetTags
+            if (ips.ruleSetTags.isNotEmpty() && sourceSide) put("rule_set_ip_cidr_match_source", true)
+
+            val (ports, ranges) = MatcherSyntax.ports(rule.port)
+            if (ports.isNotEmpty()) {
+                putJsonArray(if (sourceSide) "source_port" else "port") { ports.forEach { add(it) } }
+            }
+            stringArray(if (sourceSide) "source_port_range" else "port_range", ranges)
+
+            // На Android процесс — это пакет приложения.
+            stringArray("package_name", rule.processNames)
+            if (rule.network.isNotBlank()) put("network", rule.network)
+            stringArray("protocol", rule.protocols)
+            if (rule.clashMode.isNotBlank()) put("clash_mode", rule.clashMode)
+            stringArray("rule_set", ruleSetTags.distinct())
+        }
+        // Всё выше могло не дать ни одного матчера (только `ext:`-домены, например).
+        if (matchers.isEmpty()) return null
+        return JsonObject(
+            matchers.toMutableMap().apply {
+                if (rule.invert) put("invert", JsonPrimitive(true))
+                put("outbound", JsonPrimitive(tag))
+            },
+        )
+    }
+
+    private fun dnsRule(rule: DnsRule): JsonObject? {
+        val matchers = buildJsonObject {
+            val domains = MatcherSyntax.domains(rule.domains)
+            stringArray("domain", domains.exact)
+            stringArray("domain_suffix", domains.suffix)
+            stringArray("domain_keyword", domains.keyword)
+            stringArray("domain_regex", domains.regex)
+            stringArray("package_name", rule.processNames)
+            stringArray("rule_set", (rule.ruleSets + domains.ruleSetTags).distinct())
+        }
+        if (matchers.isEmpty()) return null
+        if (!rule.reject && rule.serverTag.isBlank()) return null
+        return JsonObject(
+            matchers.toMutableMap().apply {
+                if (rule.invert) put("invert", JsonPrimitive(true))
+                if (rule.reject) {
+                    put("action", JsonPrimitive("reject"))
+                } else {
+                    put("server", JsonPrimitive(rule.serverTag))
+                }
+            },
+        )
+    }
+
+    private fun groupOutbound(group: ServerGroup, members: List<ProxyConfig>): JsonObject = buildJsonObject {
+        val tags = members.map { ProfileTags.server(it.id) }
+        put("tag", ProfileTags.group(group.id))
+        putJsonArray("outbounds") { tags.forEach { add(it) } }
+        when (group.kind) {
+            GroupKind.SELECTOR -> {
+                put("type", "selector")
+                group.selectedId?.let(ProfileTags::server)?.takeIf { it in tags }?.let { put("default", it) }
+            }
+            GroupKind.URLTEST -> {
+                put("type", "urltest")
+                put("url", group.testUrl)
+                put("interval", group.interval)
+                put("tolerance", group.tolerance)
+            }
+        }
+    }
+
+    /** DNS-детур на узел или группу, которых нет в конфиге, уходит в `proxy`. */
+    private fun OutboundGraph.detourTag(detour: String): String =
+        if ((detour.startsWith("srv-") || detour.startsWith("grp-")) && detour !in tags) TAG_PROXY else detour
+
+    private fun JsonObjectBuilder.stringArray(key: String, values: List<String>) {
+        if (values.isNotEmpty()) putJsonArray(key) { values.forEach { add(it) } }
     }
 
     private fun logJson(options: TunnelOptions): JsonObject = buildJsonObject {
@@ -194,7 +305,7 @@ object SingboxConfig {
         options.logFile?.let { put("output", it) }
     }
 
-    private fun outbound(cfg: ProxyConfig, tag: String): JsonObject = buildJsonObject {
+    internal fun outbound(cfg: ProxyConfig, tag: String): JsonObject = buildJsonObject {
         put("tag", tag)
 
         when (cfg.proto) {
@@ -457,21 +568,4 @@ object SingboxConfig {
             }
         }
     }
-
-    private val PRIVATE_NETWORKS = listOf(
-        "10.0.0.0/8",
-        "100.64.0.0/10",
-        "127.0.0.0/8",
-        "169.254.0.0/16",
-        "172.16.0.0/12",
-        "192.0.0.0/24",
-        "192.0.2.0/24",
-        "192.168.0.0/16",
-        "198.18.0.0/15",
-        "198.51.100.0/24",
-        "203.0.113.0/24",
-        "224.0.0.0/3",
-        "fc00::/7",
-        "fe80::/10",
-    )
 }

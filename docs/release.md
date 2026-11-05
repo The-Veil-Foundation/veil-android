@@ -84,16 +84,20 @@ cat ~/.local/veil/veil-release.b64 | xclip -selection clipboard   # или от�
 Автоматических сборок нет: ни на push, ни на тег. Сборка запускается только
 вручную.
 
-1. Поднять версию в `composeApp/build.gradle.kts`:
+1. Поднять версию в файле `VERSION` в корне репозитория — одна строка:
 
-```kotlin
-versionCode = 3          // всегда больше предыдущего
-versionName = "0.1.1"    // тег будет v0.1.1
 ```
+0.1.1
+```
+
+Из него Gradle берёт `versionName`, считает `versionCode`
+(X·1 000 000 + Y·10 000 + Z·100, у релиза +99, у предрелиза `-beta.N` +N)
+и генерирует `AppVersion` для кода: User-Agent подписки по умолчанию —
+`Veil/<версия>`, пока пользователь не задал свой.
 
 2. Закоммитить и запушить `main`.
 3. GitHub → **Actions** → **Release** → **Run workflow** → в поле `tag` ввести
-   `v0.1.1` (должен совпадать с `versionName` без `v`, иначе job упадёт на шаге
+   `v0.1.1` (должен совпадать с `VERSION` без `v`, иначе job упадёт на шаге
    «Check versions match»). При желании включить `draft`.
 4. Через несколько минут в Releases появятся:
 

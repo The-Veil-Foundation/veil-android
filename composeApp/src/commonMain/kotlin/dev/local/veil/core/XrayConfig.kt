@@ -34,12 +34,10 @@ data class TunnelOptions(
     val stats: Boolean = true,
     val inboundName: String = "veil0",
     val fragment: Boolean = false,
-    val bypassRu: Boolean = false,
     /** Какое ядро запускать: AUTO выбирает по протоколу узла. */
     val coreEngine: CoreEngine = CoreEngine.AUTO,
-    /** Правила маршрутизации: пресет + пользовательские. */
+    /** Упорядоченные правила: см. [AppSettings.effectiveRoutingRules]. */
     val rules: List<RoutingRule> = emptyList(),
-    val blockAds: Boolean = false,
     /** Полные настройки DNS (null — использовать legacy [dnsServers]). */
     val dnsSettings: DnsSettings? = null,
     /** Участники группы «самый быстрый»: строим leastPing-балансировщик. */
@@ -50,13 +48,36 @@ data class TunnelOptions(
      * («failed to open geoip.dat»), поэтому такие матчеры вырезаются.
      */
     val geoAvailable: Boolean = false,
-)
+    /** Все узлы: из них строятся выходы для правил «через этот узел». */
+    val servers: List<ProxyConfig> = emptyList(),
+    /** Группы, на которые могут ссылаться правила. */
+    val groups: List<ServerGroup> = emptyList(),
+    /** Rule-set, добавленные руками (sing-box). */
+    val ruleSets: List<RuleSetRef> = emptyList(),
+    /** Секрет Clash API sing-box; пусто — API не поднимается. */
+    val clashSecret: String = "",
+) {
+    /**
+     * Опции для пробного ядра (пинг, проверка узла). Пробе достаточно дойти
+     * до сервера: правила ей не нужны, а rule-set заставили бы её качать
+     * наборы перед замером, и Clash API занял бы порт рабочего туннеля.
+     */
+    fun forProbe(): TunnelOptions = copy(
+        rules = emptyList(),
+        ruleSets = emptyList(),
+        servers = emptyList(),
+        groups = emptyList(),
+        dnsSettings = dnsSettings?.copy(rules = emptyList()),
+        clashSecret = "",
+    )
+}
 
 /**
  * Собирает Xray-JSON из [ProxyConfig].
  *
- * Порт `XrayConfigBuilder.swift`. Отличия только в том, что здесь нет ветки
- * balancer/групп — она появится вместе с экраном групп.
+ * Порт `XrayConfigBuilder.swift`. В отличие от macOS, правило, которое
+ * называет узел или группу, здесь получает собственный выход (или
+ * балансировщик), а не сводится к единственному `proxy`.
  */
 object XrayConfig {
 
@@ -82,6 +103,38 @@ object XrayConfig {
         val hasDns = dnsSettings?.servers?.isNotEmpty() ?: options.dnsServers.isNotEmpty()
         val balancer = options.balancerMembers.filter { it.xrayCompatible }
         val useBalancer = balancer.size > 1
+        val graph = OutboundGraph.build(
+            rules = options.rules,
+            servers = options.servers,
+            groups = options.groups,
+            capable = { it.xrayCompatible },
+        )
+        // «Самый быстрый» — балансировщик Xray; ручной выбор — его выбранный участник.
+        val urltestGroups = graph.groups.filter { (group, members) ->
+            group.kind == GroupKind.URLTEST && members.size > 1
+        }
+        val balancerTags = urltestGroups.map { ProfileTags.group(it.first.id) }.toSet()
+        fun xrayTarget(target: RuleTarget): String {
+            if (!target.needsProfile) return target.xrayTag()
+            if (target.kind == TargetKind.GROUP) {
+                val built = graph.groups.firstOrNull { it.first.id == target.id } ?: return TAG_PROXY
+                val (group, members) = built
+                if (ProfileTags.group(group.id) in balancerTags) return ProfileTags.group(group.id)
+                val chosen = members.firstOrNull { it.id == group.selectedId } ?: members.first()
+                return ProfileTags.server(chosen.id)
+            }
+            return graph.tagFor(target)
+        }
+        val routingRules = options.rules
+            .mapNotNull { rule ->
+                val tag = xrayTarget(rule.target)
+                rule.xrayRule(outboundTag = tag, balancer = tag in balancerTags)
+            }
+            .let { rules -> if (options.geoAvailable) rules else rules.mapNotNull(::withoutGeoRule) }
+        val observed = buildList {
+            if (useBalancer) balancer.indices.forEach { add("bal-$it") }
+            urltestGroups.forEach { (_, members) -> members.forEach { add(ProfileTags.server(it.id)) } }
+        }.distinct()
 
         return buildJsonObject {
             put("log", logJson(options))
@@ -95,6 +148,7 @@ object XrayConfig {
                 } else {
                     add(outbound(cfg, TAG_PROXY, options))
                 }
+                graph.servers.forEach { server -> add(outbound(server, ProfileTags.server(server.id), options)) }
                 addJsonObject { put("tag", TAG_DIRECT); put("protocol", "freedom"); put("settings", JsonObject(emptyMap())) }
                 addJsonObject { put("tag", TAG_BLOCK); put("protocol", "blackhole"); put("settings", JsonObject(emptyMap())) }
                 if (hasDns) {
@@ -112,53 +166,38 @@ object XrayConfig {
                             put("outboundTag", TAG_DNS_OUT)
                         }
                     }
-                    // Пользовательские и пресетные правила — раньше общих.
-                    options.rules.forEach { rule -> rule.xrayRule()?.let { add(it) } }
-                    if (options.blockAds && options.geoAvailable) {
-                        addJsonObject {
-                            put("type", "field")
-                            putJsonArray("domain") { add("geosite:category-ads-all") }
-                            put("outboundTag", TAG_BLOCK)
-                        }
-                    }
-                    // Приватные диапазоны перечислены явно: geoip.dat в APK нет,
-                    // а `geoip:private` без него роняет весь конфиг.
-                    addJsonObject {
-                        put("type", "field")
-                        putJsonArray("ip") { PRIVATE_NETWORKS.forEach { add(it) } }
-                        put("outboundTag", TAG_DIRECT)
-                    }
-                    if (options.bypassRu) {
-                        addJsonObject {
-                            put("type", "field")
-                            putJsonArray("domain") {
-                                add("domain:ru")
-                                add("domain:su")
-                                add("domain:xn--p1ai")
-                            }
-                            put("outboundTag", TAG_DIRECT)
-                        }
-                    }
+                    // Первое совпавшее правило побеждает; порядок задаёт
+                    // AppSettings.effectiveRoutingRules (охрана LAN — внутри).
+                    routingRules.forEach { add(it) }
                     addJsonObject {
                         put("type", "field")
                         put("network", "tcp,udp")
                         if (useBalancer) put("balancerTag", TAG_PROXY) else put("outboundTag", TAG_PROXY)
                     }
                 }
-                if (useBalancer) {
+                if (useBalancer || urltestGroups.isNotEmpty()) {
                     putJsonArray("balancers") {
-                        addJsonObject {
-                            put("tag", TAG_PROXY)
-                            putJsonArray("selector") { balancer.indices.forEach { add("bal-$it") } }
-                            put("strategy", "leastPing")
+                        if (useBalancer) {
+                            addJsonObject {
+                                put("tag", TAG_PROXY)
+                                putJsonArray("selector") { balancer.indices.forEach { add("bal-$it") } }
+                                putJsonObject("strategy") { put("type", "leastPing") }
+                            }
+                        }
+                        urltestGroups.forEach { (group, members) ->
+                            addJsonObject {
+                                put("tag", ProfileTags.group(group.id))
+                                putJsonArray("selector") { members.forEach { add(ProfileTags.server(it.id)) } }
+                                putJsonObject("strategy") { put("type", "leastPing") }
+                            }
                         }
                     }
                 }
             }
 
-            if (useBalancer) {
+            if (observed.isNotEmpty()) {
                 putJsonObject("observatory") {
-                    putJsonArray("subjectSelector") { balancer.indices.forEach { add("bal-$it") } }
+                    putJsonArray("subjectSelector") { observed.forEach { add(it) } }
                     put("probeUrl", "https://www.gstatic.com/generate_204")
                     put("probeInterval", "1m")
                     put("enableConcurrency", true)

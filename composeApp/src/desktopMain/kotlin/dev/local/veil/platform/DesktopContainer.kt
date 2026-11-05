@@ -132,7 +132,7 @@ class DesktopLogProvider : LogProvider {
 
 /** На десктопе обновления не поддерживаются — только на Android. */
 class DesktopUpdateService : UpdateService {
-    override val currentVersion: String = "0.1.0-alpha"
+    override val currentVersion: String = dev.local.veil.AppVersion.NAME
     override suspend fun latest(): Result<AppRelease?> =
         Result.failure(UnsupportedOperationException("Обновления доступны только на Android"))
     override suspend fun download(release: AppRelease, onProgress: (Float) -> Unit): Result<String> =
@@ -161,6 +161,10 @@ class DesktopContainer : AppContainer {
 private class DesktopGeoService : GeoService {
     override val directory: String = ""
     override val hasAssets: Boolean = false
-    override suspend fun download(source: dev.local.veil.core.GeoAssetSource): Result<Unit> =
+    override suspend fun download(
+        source: dev.local.veil.core.GeoAssetSource,
+        customGeoip: String,
+        customGeosite: String,
+    ): Result<Unit> =
         Result.failure(UnsupportedOperationException("Geo-базы доступны только на Android"))
 }
