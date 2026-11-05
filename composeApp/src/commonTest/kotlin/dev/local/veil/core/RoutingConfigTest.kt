@@ -69,6 +69,16 @@ class RoutingConfigTest {
     }
 
     @Test
+    fun xrayUsesBatteryFriendlyKeepAlive() {
+        val config = json(XrayConfig.json(node, TunnelOptions()))
+        val proxy = (config["outbounds"] as JsonArray).map { it.jsonObject }
+            .first { it["tag"]?.jsonPrimitive?.content == "proxy" }
+        val sockopt = proxy["streamSettings"]!!.jsonObject["sockopt"]!!.jsonObject
+        assertEquals("60", sockopt["tcpKeepAliveIdle"]!!.jsonPrimitive.content)
+        assertEquals("30", sockopt["tcpKeepAliveInterval"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun xrayProbesLargeBalancerLessOften() {
         // Каждая проба — отдельный запрос. На большом списке узлов раз в
         // минуту это заметный расход батареи, поэтому интервал растёт.

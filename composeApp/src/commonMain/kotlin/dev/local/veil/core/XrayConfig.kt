@@ -250,6 +250,12 @@ object XrayConfig {
         val mutable = doc.toMutableMap()
         mutable["log"] = logJson(options)
         mutable["inbounds"] = JsonArray(inboundList(inbound))
+        // Та же причина, что и у observatory: keepalive раз в 15 секунд
+        // держит радио активным даже на простое. Панели обычно не задают
+        // его вовсе, тогда Xray берёт агрессивный дефолт Go.
+        (mutable["outbounds"] as? JsonArray)?.let { outbounds ->
+            mutable["outbounds"] = withBatteryFriendlyKeepAlive(outbounds)
+        }
         if (!options.geoAvailable) {
             (mutable["routing"] as? JsonObject)?.let { mutable["routing"] = withoutGeoRouting(it) }
             (mutable["dns"] as? JsonObject)?.let { mutable["dns"] = withoutGeoDns(it) }
@@ -362,6 +368,37 @@ object XrayConfig {
         val tag = (outbound["tag"] as? JsonPrimitive)?.content ?: return@mapNotNull null
         val protocol = (outbound["protocol"] as? JsonPrimitive)?.content?.lowercase()
         if (protocol in NON_PROXY_PROTOCOLS) null else tag
+    }
+
+    /**
+     * Keepalive для выходов подписки. Не трогаем явно выставленные большие
+     * значения, но не даём панели (или дефолту Go) пинговать чаще 60/30.
+     */
+    private fun withBatteryFriendlyKeepAlive(outbounds: JsonArray): JsonArray {
+        var changed = false
+        val patched = outbounds.map { element ->
+            val outbound = element as? JsonObject ?: return@map element
+            val protocol = (outbound["protocol"] as? JsonPrimitive)?.content?.lowercase()
+            if (protocol in NON_PROXY_PROTOCOLS) return@map element
+            val stream = (outbound["streamSettings"] as? JsonObject)?.toMutableMap() ?: LinkedHashMap()
+            val sockopt = (stream["sockopt"] as? JsonObject)?.toMutableMap() ?: LinkedHashMap()
+            val idle = (sockopt["tcpKeepAliveIdle"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+            val interval = (sockopt["tcpKeepAliveInterval"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+            var touched = false
+            if (idle < 60) {
+                sockopt["tcpKeepAliveIdle"] = JsonPrimitive(60)
+                touched = true
+            }
+            if (interval < 30) {
+                sockopt["tcpKeepAliveInterval"] = JsonPrimitive(30)
+                touched = true
+            }
+            if (!touched) return@map element
+            stream["sockopt"] = JsonObject(sockopt)
+            changed = true
+            JsonObject(outbound.toMutableMap().apply { put("streamSettings", JsonObject(stream)) })
+        }
+        return if (changed) JsonArray(patched) else outbounds
     }
 
     /** Протоколы, которые не несут пользовательский трафик наружу. */
@@ -700,8 +737,10 @@ object XrayConfig {
         }
         putJsonObject("sockopt") {
             put("tcpNoDelay", true)
-            put("tcpKeepAliveIdle", 30)
-            put("tcpKeepAliveInterval", 15)
+            // Редкие keepalive меньше будят радио на мобильной сети. 60/30
+            // всё ещё переживает NAT оператора, но не пингует каждые 15 секунд.
+            put("tcpKeepAliveIdle", 60)
+            put("tcpKeepAliveInterval", 30)
         }
 
         when (cfg.security) {

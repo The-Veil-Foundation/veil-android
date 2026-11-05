@@ -144,6 +144,19 @@ class SubscriptionConfigArrayTest {
     }
 
     @Test
+    fun `provider tcp keepalive is relaxed for mobile networks`() {
+        val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
+        val outbounds = config["outbounds"]!!.jsonArray.map { it.jsonObject }
+        val reality = outbounds.first { it["tag"]?.jsonPrimitive?.content == "A-REALITY" }
+        val sockopt = reality["streamSettings"]!!.jsonObject["sockopt"]!!.jsonObject
+        assertEquals("60", sockopt["tcpKeepAliveIdle"]!!.jsonPrimitive.content)
+        assertEquals("30", sockopt["tcpKeepAliveInterval"]!!.jsonPrimitive.content)
+        // freedom/blackhole не держат соединение с узлом — их не трогаем.
+        val direct = outbounds.first { it["tag"]?.jsonPrimitive?.content == "direct" }
+        assertTrue(direct["streamSettings"] == null)
+    }
+
+    @Test
     fun `provider policy keeps its levels and gets outbound counters`() {
         val withPolicy = body.replace(
             "\"remarks\": \"Тест · Эстония\",",
