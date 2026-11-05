@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import dev.local.veil.core.AppStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Material You: на Android 12+ палитра берётся из обоев пользователя,
@@ -110,6 +111,9 @@ fun OrbitTheme(
     val base = dynamicColorScheme(dark) ?: if (dark) FallbackDark else FallbackLight
     val scheme = if (pitchBlack) pitchBlackScheme(base) else base
 
+    // MaterialExpressiveTheme в Compose Multiplatform 1.9 ещё помечен internal
+    // (публичен только в androidx-сборке), поэтому берём MaterialTheme и
+    // добавляем экспрессивность сами: формы, типографика и Motion.kt.
     MaterialTheme(
         colorScheme = scheme,
         typography = orbitTypography(),
@@ -133,14 +137,18 @@ internal fun orbitShapes() = Shapes(
  */
 internal fun orbitTypography(): Typography {
     val base = Typography()
+    // M3 Expressive: акцентная (emphasized) шкала — те же размеры, но
+    // плотнее трекинг и тяжелее вес для заголовков и подписей.
     return base.copy(
-        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold),
-        headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold),
-        headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold),
-        titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold),
-        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-        labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-        labelMedium = base.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+        displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
+        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp),
+        headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp),
+        headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
+        titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.sp),
+        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
+        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
+        labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
+        labelMedium = base.labelMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp),
+        labelSmall = base.labelSmall.copy(fontWeight = FontWeight.Medium, letterSpacing = 0.4.sp),
     )
 }

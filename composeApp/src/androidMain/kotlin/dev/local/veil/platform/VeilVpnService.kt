@@ -155,6 +155,9 @@ class VeilVpnService : VpnService() {
         val child = ParcelFileDescriptor.dup(master.fileDescriptor)
         coreFd = child
         engine = core
+        if (core == CoreEngine.SING_BOX) {
+            runCatching { singbox.Singbox.install(applicationContext) }
+        }
         return when (core) {
             CoreEngine.SING_BOX -> SingboxBridge.start(configJson, child.fd, geoDirectory, 0)
             else -> XrayBridge.start(configJson, child.fd, geoDirectory, 0)
@@ -364,6 +367,19 @@ class VeilVpnService : VpnService() {
     }
 
     private fun reload(configJson: String, serverName: String, newEngine: CoreEngine? = null) {
+        // На паузе VPN-интерфейса нет: просто запоминаем новый узел,
+        // туннель поднимется при возобновлении, сервис не убиваем.
+        if (paused) {
+            if (configJson.isNotBlank()) {
+                lastConfig = configJson
+                lastServerName = serverName
+                activeServerName = serverName
+                newEngine?.let { lastEngine = it }
+            }
+            publish(VpnStatus(VpnPhase.PAUSED, serverName = activeServerName, connectedSince = connectedAt))
+            notify(activeServerName, live = false)
+            return
+        }
         val fd = tun
         if (fd == null || configJson.isBlank()) {
             stop(this)
@@ -427,34 +443,49 @@ class VeilVpnService : VpnService() {
     }
 
     /**
-     * Пауза: останавливаем ядро, но TUN оставляем поднятым — пакеты не текут
-     * (без утечки), соединение готово мгновенно возобновиться.
+     * Пауза: полностью отпускаем VPN-интерфейс и останавливаем ядро.
+     *
+     * Раньше TUN оставался поднятым, и весь трафик уходил в него без ядра —
+     * интернет «умирал» до полного отключения. Теперь при паузе интерфейс
+     * закрывается: приложения ходят напрямую, а сервис/уведомление остаются
+     * жить в фоне. На возобновлении TUN создаётся заново.
      */
     private fun pause() {
-        if (paused || tun == null) return
+        if (paused) return
         paused = true
+        notificationJob?.cancel()
+        notificationJob = null
         stopCores()
         runCatching { coreFd?.close() }
         coreFd = null
+        runCatching { tun?.close() }
+        tun = null
         lastTick = 0L
         publish(VpnStatus(VpnPhase.PAUSED, serverName = activeServerName, connectedSince = connectedAt))
         notify(activeServerName, live = false)
     }
 
-    /** Возобновление: перезапуск ядра на том же TUN-дескрипторе. */
+    /** Возобновление: заново создаём TUN и поднимаем ядро с последним конфигом. */
     private fun resume() {
         if (!paused) return
-        if (tun == null) {
+        val tunnelParams = params
+        if (tunnelParams == null || lastConfig.isBlank()) {
             teardown(resetStatus = true)
             stopSelf()
             return
         }
-        startCore(lastConfig, lastEngine)
-            .onFailure {
-                paused = false
-                fail("Возобновление не удалось: ${it.message}")
-                return
-            }
+        val fresh = runCatching { openTun(tunnelParams) }.getOrNull()
+        if (fresh == null) {
+            paused = false
+            fail("Не удалось вернуть VPN: проверьте разрешение на VPN")
+            return
+        }
+        tun = fresh
+        startCore(lastConfig, lastEngine).onFailure {
+            paused = false
+            fail("Возобновление не удалось: ${it.message}")
+            return
+        }
         paused = false
         publish(
             VpnStatus(

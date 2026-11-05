@@ -1,4 +1,4 @@
-package dev.local.veil.core
+﻿package dev.local.veil.core
 
 import kotlinx.serialization.Serializable
 

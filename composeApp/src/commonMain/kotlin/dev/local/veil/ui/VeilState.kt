@@ -1,4 +1,4 @@
-package dev.local.veil.ui
+﻿package dev.local.veil.ui
 
 import dev.local.veil.core.Pairing
 import dev.local.veil.core.ShareLink
@@ -491,7 +491,7 @@ class VeilState(
         if (pinging || targets.isEmpty()) return
         val mode = pingMode
         if (mode == PingMode.REAL && !container.vpn.coreAvailable) {
-            showBulletin(tr("Реальный пинг требует ядро Xray — выберите TCP или ICMP", "Real ping requires the Xray core — choose TCP or ICMP"), BulletinKind.ERROR)
+            showBulletin(tr("Реальный пинг требует ядро в сборке — выберите TCP или ICMP", "Real ping requires a bundled core — choose TCP or ICMP"), BulletinKind.ERROR)
             return
         }
         pinging = true
@@ -865,7 +865,7 @@ class VeilState(
             return
         }
         if (!server.isUsable) {
-            showBulletin(tr("Протокол ${server.proto.wire} требует sing-box, а сборка на Xray", "Protocol ${server.proto.wire} requires sing-box, but this build uses Xray"), BulletinKind.ERROR)
+            showBulletin(tr("Протокол ${server.proto.wire} требует sing-box, а ядро sing-box недоступно", "Protocol ${server.proto.wire} requires sing-box, but the sing-box core is unavailable"), BulletinKind.ERROR)
             return
         }
         if (!coreAvailable) {

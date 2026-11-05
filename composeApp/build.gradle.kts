@@ -42,8 +42,14 @@ kotlin {
                 implementation(libs.zxing.core)
                 // Ядро собирается Scripts/build-xray-android.sh. Пока AAR нет,
                 // проект всё равно компилируется — подключение честно откажет.
+                // Единый gomobile-AAR: Xray + sing-box libbox в одном go.Seq.
+                // Старый xray.aar нельзя держать рядом — будет дубль go.Seq.
+                val coreAar = file("libs/veil-core.aar")
                 val xrayAar = file("libs/xray.aar")
-                if (xrayAar.exists()) implementation(files(xrayAar))
+                when {
+                    coreAar.exists() -> implementation(files(coreAar))
+                    xrayAar.exists() -> implementation(files(xrayAar))
+                }
             }
         }
         val desktopMain by getting {

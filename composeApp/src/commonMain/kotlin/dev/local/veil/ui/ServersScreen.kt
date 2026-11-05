@@ -15,6 +15,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.rotate
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
@@ -34,18 +36,23 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -91,6 +98,7 @@ fun ServersScreen(
 ) {
     var query by remember { mutableStateOf("") }
     var onlyFast by remember { mutableStateOf(false) }
+    val reduceMotion = LocalReduceMotion.current
     var collapsed by remember { mutableStateOf<Set<String>>(emptySet()) }
     val seen = remember { mutableSetOf<Any>() }
     // Действия над сервером и подпиской живут в нижних листах по долгому нажатию.
@@ -100,7 +108,12 @@ fun ServersScreen(
     val groups = remember(state.servers, state.subscriptions, onlyFast, state.pings, query) {
         val needle = query.trim()
         val visible = state.visibleServers
-            .filter { needle.isEmpty() || state.displayName(it).contains(needle, ignoreCase = true) }
+            .filter { server ->
+                needle.isEmpty() ||
+                    state.displayName(server).contains(needle, ignoreCase = true) ||
+                    // Поиск по адресу/порту: удобно и для проверки узла.
+                    server.endpoint.contains(needle, ignoreCase = true)
+            }
             .filter { !onlyFast || (state.pings[it.id] ?: Int.MAX_VALUE) < 250 }
 
         visible.groupBy { it.source }.map { (source, list) ->
@@ -135,48 +148,14 @@ fun ServersScreen(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        // Большая карточка плавно превращается в компактную панель с той же
-        // кнопкой включения, как только список прокрутили.
-        AnimatedContent(
-            targetState = compact,
-            transitionSpec = {
-                if (state.isTv) {
-                    EnterTransition.None togetherWith ExitTransition.None
-                } else {
-                    (fadeIn(tween(180)) + scaleIn(initialScale = 0.97f)) togetherWith
-                        (fadeOut(tween(180)) + scaleOut(targetScale = 0.99f))
-                }
-            },
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            label = "status-morph",
-        ) { isCompact ->
-            if (isCompact) {
-                CompactStatusBar(
-                    status = status,
-                    server = state.selected,
-                    onToggle = { state.toggleTunnel(status) },
-                    checkingServer = state.checkingServer,
-                    now = now,
-                )
-            } else {
-                StatusCard(
-                    status = status,
-                    server = state.selected,
-                    onToggle = { state.toggleTunnel(status) },
-                    checkingServer = state.checkingServer,
-                    now = now,
-                )
-            }
-        }
-
+    // Список серверов выносим в отдельный блок: на телефоне он под карточкой,
+    // на широком экране (ландшафт, планшет, ТВ) — справа от неё.
+    val serverList: @Composable (Modifier) -> Unit = { listModifier ->
         RefreshableBox(
             enabled = !state.isTv,
             isRefreshing = state.busy,
             onRefresh = { state.refreshAll() },
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
+            modifier = listModifier,
         ) {
         LazyColumn(
             state = listState,
@@ -193,6 +172,11 @@ fun ServersScreen(
             }
         }
         item {
+            val chipShape = CircleShape
+            val chipColors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -201,11 +185,15 @@ fun ServersScreen(
                 FilterChip(
                     selected = !onlyFast,
                     onClick = { onlyFast = false },
+                    shape = chipShape,
+                    colors = chipColors,
                     label = { Text(tr("Все (${state.servers.size})", "All (${state.servers.size})")) },
                 )
                 FilterChip(
                     selected = onlyFast,
                     onClick = { onlyFast = true },
+                    shape = chipShape,
+                    colors = chipColors,
                     label = { Text(tr("Быстрые", "Fastest")) },
                 )
                 Spacer(Modifier.weight(1f))
@@ -253,7 +241,7 @@ fun ServersScreen(
             groups.forEach { group ->
                 item(key = "header-${group.key}") {
                     GroupHeader(
-                        modifier = if (state.isTv) Modifier else Modifier.animateItem(),
+                        modifier = if (state.isTv || reduceMotion) Modifier else Modifier.animateItem(),
                         group = group,
                         expanded = group.key !in collapsed,
                         pinging = group.servers.any { it.id in state.pingingIds },
@@ -269,7 +257,7 @@ fun ServersScreen(
                 if (group.key !in collapsed) {
                     itemsIndexed(group.servers, key = { _, it -> it.id }) { i, server ->
                         ServerRow(
-                            modifier = if (state.isTv) Modifier else Modifier.animateItem(),
+                            modifier = if (state.isTv || reduceMotion) Modifier else Modifier.animateItem(),
                             first = i == 0,
                             last = i == group.servers.lastIndex,
                             server = server,
@@ -286,6 +274,72 @@ fun ServersScreen(
             }
         }
         }
+        }
+    }
+
+    // Адаптив: в узком окне карточка сверху, в широком (ландшафт, планшет,
+    // Android TV) — слева, а список серверов справа от неё.
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val wide = maxWidth >= 720.dp
+        val availableWidth = maxWidth
+        if (wide) {
+            Row(Modifier.fillMaxSize()) {
+                Column(
+                    Modifier
+                        .width(minOf(400.dp, availableWidth * 0.40f))
+                        .fillMaxHeight()
+                        // В ландшафте высота маленькая: если карточка не влезает,
+                        // она прокручивается, а не сжимает кнопку подключения.
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    StatusCard(
+                        status = status,
+                        server = state.selected,
+                        onToggle = { state.toggleTunnel(status) },
+                        checkingServer = state.checkingServer,
+                        now = now,
+                    )
+                }
+                serverList(Modifier.weight(1f).fillMaxHeight())
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                // Большая карточка плавно превращается в компактную панель с той
+                // же кнопкой включения, как только список прокрутили.
+                AnimatedContent(
+                    targetState = compact,
+                    transitionSpec = {
+                        if (state.isTv) {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        } else {
+                            (fadeIn(tween(180)) + scaleIn(initialScale = 0.97f)) togetherWith
+                                (fadeOut(tween(180)) + scaleOut(targetScale = 0.99f))
+                        }
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    label = "status-morph",
+                ) { isCompact ->
+                    if (isCompact) {
+                        CompactStatusBar(
+                            status = status,
+                            server = state.selected,
+                            onToggle = { state.toggleTunnel(status) },
+                            checkingServer = state.checkingServer,
+                            now = now,
+                        )
+                    } else {
+                        StatusCard(
+                            status = status,
+                            server = state.selected,
+                            onToggle = { state.toggleTunnel(status) },
+                            checkingServer = state.checkingServer,
+                            now = now,
+                        )
+                    }
+                }
+                serverList(Modifier.weight(1f).fillMaxWidth())
+            }
         }
     }
 
@@ -381,7 +435,7 @@ private fun GroupHeader(
     // Шеврон не подменяется, а поворачивается — как в списках iOS.
     val chevron by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(180),
+        animationSpec = VeilMotion.fastSpatial,
         label = "chevron",
     )
     Row(
@@ -472,19 +526,20 @@ private fun ServerRow(
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.965f else 1f,
-        animationSpec = tween(180),
+        animationSpec = VeilMotion.fastSpatial,
         label = "row-press",
     )
 
     // Сегментированный список как в bottom sheet: крайние строки крупнее.
     val corner by animateDpAsState(
         targetValue = if (selected) 32.dp else 24.dp,
-        animationSpec = tween(180),
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 1400f),
         label = "row-corner",
     )
     val rowColor by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.secondaryContainer
         else MaterialTheme.colorScheme.surfaceContainerLow,
+        animationSpec = spring(dampingRatio = 1f, stiffness = 1600f),
         label = "row-bg",
     )
     val rowContent by animateColorAsState(
@@ -560,7 +615,7 @@ private fun UpdateAvailableRow(state: VeilState) {
     val progress = state.updateProgress
     Surface(
         onClick = { if (progress == null) state.downloadUpdate() },
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.tertiaryContainer,
         contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
         modifier = Modifier.fillMaxWidth(),

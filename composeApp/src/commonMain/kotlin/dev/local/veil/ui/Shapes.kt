@@ -168,7 +168,7 @@ fun ExpressiveLoader(
     diameter: Dp = 24.dp,
     color: Color = MaterialTheme.colorScheme.primary,
 ) {
-    if (LocalTvMode.current) {
+    if (LocalTvMode.current || LocalReduceMotion.current) {
         Canvas(modifier = modifier.size(diameter)) {
             drawCircle(color = color, radius = size.minDimension / 2f)
         }
@@ -244,7 +244,7 @@ fun CookieBadge(
     spinning: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    if (LocalTvMode.current || !spinning) {
+    if (LocalTvMode.current || LocalReduceMotion.current || !spinning) {
         Box(modifier.size(diameter), contentAlignment = Alignment.Center) {
             Canvas(Modifier.matchParentSize()) {
                 val cx = size.width / 2f

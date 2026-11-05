@@ -180,7 +180,7 @@ private fun ActionsSheet(
                                                 containerColor = MaterialTheme.colorScheme.error,
                                                 contentColor = MaterialTheme.colorScheme.onError,
                                             ),
-                                            shape = RoundedCornerShape(18.dp),
+                                            shape = MaterialTheme.shapes.large,
                                         ) { Text(tr("Удалить", "Delete")) }
                                         TextButton(onClick = { confirming = null }) { Text(tr("Отмена", "Cancel")) }
                                     }

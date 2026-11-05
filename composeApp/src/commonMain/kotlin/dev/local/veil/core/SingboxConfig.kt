@@ -92,8 +92,10 @@ object SingboxConfig {
                             put("inet6_address", "fdfe:dcba:9876::1/126")
                         }
                         put("mtu", inbound.mtu)
-                        put("auto_route", true)
-                        put("strict_route", true)
+                        // TUN создаёт VpnService (маршруты, DNS и split-tunnel
+                        // уже настроены), ядру остаётся только fd.
+                        put("auto_route", false)
+                        put("strict_route", false)
                         put("stack", "gvisor")
                     }
                     is Inbound.LocalProxy -> addJsonObject {
@@ -177,7 +179,11 @@ object SingboxConfig {
                         put("outbound", TAG_PROXY)
                     }
                 }
-                put("auto_detect_interface", true)
+                // Не привязываем сокеты к конкретному интерфейсу: на Android
+            // SO_BINDTODEVICE без root часто даёт "dial rmnet_data0: i/o timeout".
+            // Приложение и так исключено из собственного VPN, поэтому обычный
+            // маршрут ОС — правильный путь наружу.
+            put("auto_detect_interface", false)
             }
         }
     }
@@ -248,6 +254,13 @@ object SingboxConfig {
                                 putJsonArray("alpn") { alpn.forEach { add(it) } }
                             }
                             cfg.allowInsecure.let { put("insecure", it) }
+                            // Отпечаток браузера: sing-box включает uTLS только явно.
+                            cfg.fingerprint?.let { fp ->
+                                putJsonObject("utls") {
+                                    put("enabled", true)
+                                    put("fingerprint", fp)
+                                }
+                            }
                         }
                     }
                     StreamSecurity.REALITY -> {
@@ -259,6 +272,13 @@ object SingboxConfig {
                                 cfg.shortId?.let { put("short_id", it) }
                             })
                             cfg.sni?.let { put("server_name", it) }
+                            // REALITY без uTLS sing-box не запускает вообще:
+                            // "uTLS is required by reality client".
+                            putJsonObject("utls") {
+                                put("enabled", true)
+                                put("fingerprint", cfg.fingerprint ?: "chrome")
+                            }
+                            put("insecure", cfg.allowInsecure)
                         }
                     }
                     else -> {
@@ -314,6 +334,12 @@ object SingboxConfig {
                             putJsonArray("alpn") { alpn.forEach { add(it) } }
                         }
                         cfg.allowInsecure?.let { put("insecure", it) }
+                        cfg.fingerprint?.let { fp ->
+                            putJsonObject("utls") {
+                                put("enabled", true)
+                                put("fingerprint", fp)
+                            }
+                        }
                     }
                 }
             }

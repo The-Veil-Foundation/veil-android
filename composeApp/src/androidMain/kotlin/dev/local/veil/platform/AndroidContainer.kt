@@ -47,16 +47,22 @@ class AndroidVpnController(
         (activity.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
             Configuration.UI_MODE_TYPE_TELEVISION
 
+    /** Слабое устройство: реже опрашиваем счётчики, чтобы не греть CPU. */
+    private val isLowRamAndroid =
+        (activity.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
+            ?.isLowRamDevice == true
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _status = MutableStateFlow(VpnStatus())
     override val status: StateFlow<VpnStatus> = _status.asStateFlow()
 
     override val coreAvailable: Boolean get() = XrayBridge.available || SingboxBridge.available
     override val coreVersion: String?
-        get() = when {
-            SingboxBridge.available -> SingboxBridge.version()
-            XrayBridge.available -> XrayBridge.version()
-            else -> null
+        get() {
+            val singbox = SingboxBridge.version()?.let { "sing-box $it" }
+            val xray = XrayBridge.version()?.let { "Xray $it" }
+            // Показываем ядро, которым реально поднят туннель.
+            return if (activeEngine == CoreEngine.SING_BOX) singbox ?: xray else xray ?: singbox
         }
 
     private var pollJob: Job? = null
@@ -72,6 +78,9 @@ class AndroidVpnController(
         }
 
     init {
+        // libbox требует basePath до первого newService; ставим его сразу,
+        // чтобы работали и туннель, и пробное ядро.
+        runCatching { singbox.Singbox.install(activity.applicationContext) }
         scope.launch {
             VeilVpnService.status.collect { service ->
                 _status.value = service.withCounters()
@@ -355,9 +364,15 @@ class AndroidVpnController(
             var lastDown = 0L
             var lastAt = 0L
             while (isActive) {
-                // На ТВ скорость счётчиков не нужна каждую секунду: более
-                // редкий тик заметно снижает лишние Compose-перерисовки.
-                delay(if (isTelevision) 2000 else 1000)
+                // На ТВ и слабых телефонах скорость счётчиков не нужна каждую
+                // секунду: более редкий тик заметно снижает лишние перерисовки.
+                delay(
+                    when {
+                        isTelevision -> 2000
+                        isLowRamAndroid -> 2000
+                        else -> 1000
+                    },
+                )
                 val up = upTotal()
                 val down = downTotal()
                 val now = System.currentTimeMillis()

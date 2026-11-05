@@ -45,6 +45,8 @@ fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val wide = maxWidth > 680.dp
+        val availableWidth = maxWidth
+        val availableHeight = maxHeight
 
         val qrBlock: @Composable () -> Unit = {
             Column(
@@ -62,10 +64,17 @@ fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
                     )
                     address == null -> ExpressiveLoader(diameter = 56.dp)
                     else -> {
-                        QrCode(text = address, side = if (wide) 320.dp else 250.dp)
+                        // На приставке код должен читаться с дивана: размер
+                        // считаем от экрана, а не фиксируем в 320 dp.
+                        val qrSide = if (wide) {
+                            minOf(availableWidth * 0.44f, availableHeight * 0.70f, 600.dp)
+                        } else {
+                            minOf(availableWidth - 56.dp, 320.dp)
+                        }
+                        QrCode(text = address, side = qrSide)
                         Text(
                             address,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
