@@ -154,7 +154,9 @@ android {
             isEnable = providers.gradleProperty("abiSplits").isPresent
             reset()
             include("arm64-v8a", "x86_64")
-            isUniversalApk = true
+            // Универсальный APK содержит оба ядра (~130 МБ) и не нужен:
+            // у всех реальных устройств arm64-v8a, x86_64 — только для эмулятора.
+            isUniversalApk = false
         }
     }
 
@@ -169,7 +171,14 @@ android {
             }
         }
         release {
-            isMinifyEnabled = false
+            // R8 вырезает неиспользуемый код (иконки Material, корутины, Compose)
+            // и переименовывает классы: dex на порядок меньше.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             signingConfig = if (!System.getenv("VEIL_KEYSTORE").isNullOrBlank()) {
                 signingConfigs.getByName("release")
             } else {
@@ -180,6 +189,15 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+
+        jniLibs {
+            // Go-ядро (libgojni.so) занимает 61 МБ и не сжимается само по себе:
+            // Android хранит .so в APK без сжатия. Legacy packaging упаковывает
+            // его deflate (61 → ~21 МБ), а установщик распаковывает при установке.
+            // Плата — чуть более долгая установка и место на диске, зато APK
+            // для скачивания втрое меньше.
+            useLegacyPackaging = true
+        }
     }
 }
 

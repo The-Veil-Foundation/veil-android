@@ -56,9 +56,8 @@ Grab an APK from the [latest release](https://github.com/The-Veil-Foundation/vei
 
 | File | For |
 | --- | --- |
-| `veil-<version>-arm64-v8a.apk` | phones and most Android TV boxes |
+| `veil-<version>-arm64-v8a.apk` | phones and most Android TV boxes — the one you need |
 | `veil-<version>-x86_64.apk` | emulators and x86 devices |
-| `veil-<version>-universal.apk` | both ABIs in one file — pick this if unsure |
 
 Allow installing from unknown sources when Android asks. Requires Android 7.0 (API 24) or
 later; 32-bit devices are not supported. The app checks GitHub Releases for updates
