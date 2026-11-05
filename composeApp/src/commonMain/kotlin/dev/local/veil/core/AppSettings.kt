@@ -103,6 +103,8 @@ enum class SplitMode {
 
 @Serializable
 data class AppSettings(
+    /** Версия схемы: одноразовые миграции настроек. */
+    val settingsVersion: Int = 1,
     val coreEngine: CoreEngine = CoreEngine.AUTO,
     val mtu: Int = 1500,
     val ipv6: Boolean = true,
@@ -153,7 +155,7 @@ data class AppSettings(
     /** Выбранные готовые списки доменов и подсетей. */
     val communityLists: List<String> = emptyList(),
     /** Куда отправлять совпадения из готовых списков. */
-    val communityListTarget: RuleTarget = RuleTarget(TargetKind.PROXY),
+    val communityListTarget: RuleTarget = RuleTarget.Direct,
 ) {
     /**
      * Упорядоченные правила для ядра, как `effectiveRoutingRules` на macOS.
@@ -195,6 +197,15 @@ data class AppSettings(
         // Старые сборки сохраняли значение по умолчанию как есть — оно не
         // выбор пользователя и должно следовать за версией.
         if (userAgent in LEGACY_DEFAULT_USER_AGENTS) return copy(userAgent = "").migrated()
+        // До v2 готовые списки по умолчанию шли в прокси. Единственный
+        // оставшийся список — «Россия внутри», ему нужен Direct.
+        if (settingsVersion < 2) {
+            return copy(
+                settingsVersion = 2,
+                communityListTarget = if (communityListTarget == RuleTarget.Proxy) RuleTarget.Direct
+                else communityListTarget,
+            ).migrated()
+        }
         if (!bypassRu) return this
         val preset = when (routingPreset) {
             RoutingPreset.GLOBAL, RoutingPreset.BYPASS_LAN -> RoutingPreset.BYPASS_RU

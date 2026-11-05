@@ -58,6 +58,7 @@ class RoutingConfigTest {
         val balancer = balancers[0].jsonObject
         assertEquals("proxy", balancer["tag"]!!.jsonPrimitive.content)
         assertEquals(2, (balancer["selector"] as JsonArray).size)
+        assertEquals("bal-0", balancer["fallbackTag"]!!.jsonPrimitive.content)
         assertTrue(config.containsKey("observatory"))
         val lastRule = (routing["rules"] as JsonArray).last().jsonObject
         assertEquals("proxy", lastRule["balancerTag"]!!.jsonPrimitive.content)

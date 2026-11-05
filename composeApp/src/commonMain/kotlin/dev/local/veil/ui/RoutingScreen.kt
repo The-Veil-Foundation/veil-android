@@ -340,6 +340,8 @@ private fun CommunityPage(state: VeilState, modifier: Modifier, onBack: () -> Un
         )
 
         CommunityCategory.entries.forEach { category ->
+            val lists = CommunityCatalog.inCategory(category)
+            if (lists.isEmpty()) return@forEach
             SettingsGroup(
                 title = communityCategoryTitle(category),
                 icon = when (category) {
@@ -347,7 +349,7 @@ private fun CommunityPage(state: VeilState, modifier: Modifier, onBack: () -> Un
                     CommunityCategory.CONTENT -> AppIcons.Filter
                     CommunityCategory.SERVICE -> AppIcons.Cloud
                 },
-                rows = CommunityCatalog.inCategory(category).map { list ->
+                rows = lists.map { list ->
                     {
                         CommunityRow(
                             list = list,
@@ -1171,7 +1173,7 @@ internal fun splitLines(raw: String): List<String> =
 /* ------------------------------------------------------------------ */
 
 /** Популярные списки, которые можно включить прямо с главной. */
-private val FEATURED_LISTS = listOf("youtube", "telegram", "discord", "ru-outside", "geoblock")
+private val FEATURED_LISTS = listOf("ru-inside")
 
 /**
  * Готовые списки — самый простой способ настроить маршрут: включил «YouTube»,
@@ -1219,8 +1221,8 @@ private fun CommunityFeature(state: VeilState, onOpen: () -> Unit) {
             }
             Text(
                 tr(
-                    "Включите сервис — и все его сайты пойдут так, как выбрано ниже, без ручных правил. Списки обновляются сами.",
-                    "Turn on a service and all its sites follow the route below, no manual rules. Lists update themselves.",
+                    "Включите список — и российские сайты пойдут напрямую, без ручных правил. Список обновляется сам.",
+                    "Turn on the list and Russian sites go direct, no manual rules. The list updates itself.",
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = scheme.onPrimaryContainer,

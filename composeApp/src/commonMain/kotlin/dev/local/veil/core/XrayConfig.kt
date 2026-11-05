@@ -135,6 +135,16 @@ object XrayConfig {
             if (useBalancer) balancer.indices.forEach { add("bal-$it") }
             urltestGroups.forEach { (_, members) -> members.forEach { add(ProfileTags.server(it.id)) } }
         }.distinct()
+        // «Самый быстрый» выбирает выход только после первого замера
+        // observatory, а до него (и пока все замеры падают) leastPing
+        // возвращает пустой тег — ядро выбрасывает соединения. fallbackTag
+        // держит туннель живым: трафик идёт через выбранный узел группы.
+        val proxyFallback = options.groups
+            .asSequence()
+            .filter { it.kind == GroupKind.URLTEST }
+            .mapNotNull { group -> group.selectedId?.let { id -> balancer.indexOfFirst { it.id == id } } }
+            .firstOrNull { it >= 0 }
+            ?: 0
 
         return buildJsonObject {
             put("log", logJson(options))
@@ -182,6 +192,7 @@ object XrayConfig {
                                 put("tag", TAG_PROXY)
                                 putJsonArray("selector") { balancer.indices.forEach { add("bal-$it") } }
                                 putJsonObject("strategy") { put("type", "leastPing") }
+                                put("fallbackTag", "bal-$proxyFallback")
                             }
                         }
                         urltestGroups.forEach { (group, members) ->
@@ -189,6 +200,8 @@ object XrayConfig {
                                 put("tag", ProfileTags.group(group.id))
                                 putJsonArray("selector") { members.forEach { add(ProfileTags.server(it.id)) } }
                                 putJsonObject("strategy") { put("type", "leastPing") }
+                                val fallback = members.firstOrNull { it.id == group.selectedId } ?: members.first()
+                                put("fallbackTag", ProfileTags.server(fallback.id))
                             }
                         }
                     }
@@ -241,9 +254,67 @@ object XrayConfig {
             (mutable["routing"] as? JsonObject)?.let { mutable["routing"] = withoutGeoRouting(it) }
             (mutable["dns"] as? JsonObject)?.let { mutable["dns"] = withoutGeoDns(it) }
         }
-        if (!mutable.containsKey("stats")) mutable["stats"] = JsonObject(emptyMap())
-        if (!mutable.containsKey("policy")) mutable["policy"] = policyJson()
+        // Панель часто приносит свой policy без счётчиков: тогда спидометр
+        // видит нули при живом трафике. Включаем outbound-статистику, не
+        // трогая уровни и остальные настройки панели.
+        if (options.stats) {
+            if (mutable["stats"] !is JsonObject) mutable["stats"] = JsonObject(emptyMap())
+            mutable["policy"] = withStatsPolicy(mutable["policy"] as? JsonObject)
+        }
+        // Балансировщик панели (leastPing/leastLoad) без fallbackTag
+        // выбрасывает соединения до первого замера observatory и тогда,
+        // когда все замеры временно упали. Подставляем живой выход.
+        (mutable["routing"] as? JsonObject)?.let { routing ->
+            mutable["routing"] = withBalancerFallback(routing, mutable["outbounds"] as? JsonArray)
+        }
         return JsonObject(mutable)
+    }
+
+    /** policy.system с включёнными счётчиками, остальное — как было. */
+    private fun withStatsPolicy(policy: JsonObject?): JsonObject {
+        val out = policy?.toMutableMap() ?: LinkedHashMap()
+        val system = (out["system"] as? JsonObject)?.toMutableMap() ?: LinkedHashMap()
+        system["statsOutboundUplink"] = JsonPrimitive(true)
+        system["statsOutboundDownlink"] = JsonPrimitive(true)
+        out["system"] = JsonObject(system)
+        return JsonObject(out)
+    }
+
+    /** Протоколы, которые не несут пользовательский трафик наружу. */
+    private val NON_PROXY_PROTOCOLS = setOf("freedom", "blackhole", "dns", "loopback")
+
+    /**
+     * fallbackTag для балансировщиков из подписки. Селекторы Xray — это
+     * префиксы тегов, поэтому берём первый реальный выход, подходящий под
+     * селектор. Уже заданный fallbackTag панели не перезаписываем.
+     */
+    private fun withBalancerFallback(routing: JsonObject, outbounds: JsonArray?): JsonObject {
+        val balancers = routing["balancers"] as? JsonArray ?: return routing
+        val proxyTags = outbounds.orEmpty().mapNotNull { element ->
+            val outbound = element as? JsonObject ?: return@mapNotNull null
+            val tag = (outbound["tag"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val protocol = (outbound["protocol"] as? JsonPrimitive)?.content?.lowercase()
+            if (protocol in NON_PROXY_PROTOCOLS) null else tag
+        }
+        if (proxyTags.isEmpty()) return routing
+
+        var changed = false
+        val patched = balancers.map { element ->
+            val balancer = element as? JsonObject ?: return@map element
+            val existing = (balancer["fallbackTag"] as? JsonPrimitive)?.content
+            if (!existing.isNullOrEmpty()) return@map element
+            val selectors = (balancer["selector"] as? JsonArray).orEmpty()
+                .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+            if (selectors.isEmpty()) return@map element
+            // Селектор обычно префиксный; если он устарел и ничего не
+            // находит, всё равно даём балансировщику живой выход.
+            val fallback = proxyTags.firstOrNull { tag -> selectors.any { tag.startsWith(it) } }
+                ?: proxyTags.first()
+            changed = true
+            JsonObject(balancer.toMutableMap().apply { put("fallbackTag", JsonPrimitive(fallback)) })
+        }
+        return if (!changed) routing
+        else JsonObject(routing.toMutableMap().apply { put("balancers", JsonArray(patched)) })
     }
 
     /* ---------------- geo-матчеры без базы ---------------- */

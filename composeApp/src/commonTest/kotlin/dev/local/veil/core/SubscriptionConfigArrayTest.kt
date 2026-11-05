@@ -3,6 +3,7 @@ package dev.local.veil.core
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -102,5 +103,38 @@ class SubscriptionConfigArrayTest {
     fun `inbounds are replaced by the tunnel`() {
         val text = XrayConfig.json(node(), TunnelOptions())
         assertTrue("\"protocol\":\"tun\"" in text)
+    }
+
+    @Test
+    fun `provider balancer gets a fallback tag`() {
+        val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
+        val balancer = config["routing"]!!.jsonObject["balancers"]!!.jsonArray.single().jsonObject
+        // Первый выход под селектором: до первого замера observatory и при
+        // упавших пробах leastLoad иначе возвращает пустой тег.
+        assertEquals("A-REALITY", balancer["fallbackTag"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `provider policy keeps its levels and gets outbound counters`() {
+        val withPolicy = body.replace(
+            "\"remarks\": \"Тест · Эстония\",",
+            "\"policy\": { \"levels\": { \"0\": { \"connIdle\": 300 } }, " +
+                "\"system\": { \"statsInboundUplink\": true } },\n        " +
+                "\"remarks\": \"Тест · Эстония\",",
+        )
+        val parsed = SubscriptionPayload.classify(withPolicy)
+        assertIs<SubscriptionPayload.Body.Ok>(parsed)
+        val config = Json.parseToJsonElement(
+            XrayConfig.json(parsed.nodes.single(), TunnelOptions()),
+        ).jsonObject
+        val policy = config["policy"]!!.jsonObject
+        assertEquals(
+            "300",
+            policy["levels"]!!.jsonObject["0"]!!.jsonObject["connIdle"]!!.jsonPrimitive.content,
+        )
+        val system = policy["system"]!!.jsonObject
+        assertTrue(system["statsInboundUplink"]!!.jsonPrimitive.content.toBoolean())
+        assertTrue(system["statsOutboundUplink"]!!.jsonPrimitive.content.toBoolean())
+        assertTrue(system["statsOutboundDownlink"]!!.jsonPrimitive.content.toBoolean())
     }
 }

@@ -154,6 +154,23 @@ class RoutingParityTest {
     }
 
     @Test
+    fun onlyRussiaInsideListRemains() {
+        assertEquals(listOf("ru-inside"), CommunityCatalog.all.map { it.id })
+    }
+
+    @Test
+    fun legacyCommunityTargetMigratesToDirectOnce() {
+        val migrated = AppSettings(communityListTarget = RuleTarget.Proxy).migrated()
+        assertEquals(RuleTarget.Direct, migrated.communityListTarget)
+        assertEquals(2, migrated.settingsVersion)
+        // После миграции явный выбор прокси больше не перезаписывается.
+        assertEquals(
+            RuleTarget.Proxy,
+            migrated.copy(communityListTarget = RuleTarget.Proxy).migrated().communityListTarget,
+        )
+    }
+
+    @Test
     fun oldStoredSettingsStillDecode() {
         val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         val stored = """{"routingPreset":"BYPASS_RU","bypassRu":true,
@@ -347,6 +364,7 @@ class RoutingParityTest {
         val balancer = (routing["balancers"] as JsonArray).map { it.jsonObject }
             .first { it["tag"]?.jsonPrimitive?.content == "grp-fast" }
         assertEquals(listOf("srv-a", "srv-b"), balancer.strings("selector"))
+        assertEquals("srv-a", balancer["fallbackTag"]?.jsonPrimitive?.content)
         val rendered = (routing["rules"] as JsonArray).map { it.jsonObject }
             .first { it.strings("domain") == listOf("domain:example.org") }
         assertEquals("grp-fast", rendered["balancerTag"]?.jsonPrimitive?.content)
