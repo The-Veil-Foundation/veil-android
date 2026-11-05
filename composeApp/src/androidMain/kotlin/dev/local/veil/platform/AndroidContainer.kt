@@ -7,6 +7,8 @@ import android.content.res.Configuration
 import android.net.VpnService
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import dev.local.veil.core.CoreEngine
 import dev.local.veil.core.ProxyConfig
 import dev.local.veil.core.SingboxConfig
@@ -58,6 +60,8 @@ class AndroidVpnController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _status = MutableStateFlow(VpnStatus())
     override val status: StateFlow<VpnStatus> = _status.asStateFlow()
+    private val _foreground = MutableStateFlow(false)
+    override val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
 
     override val coreAvailable: Boolean get() = XrayBridge.available || SingboxBridge.available
     override val coreVersion: String?
@@ -84,10 +88,23 @@ class AndroidVpnController(
         // libbox требует basePath до первого newService; ставим его сразу,
         // чтобы работали и туннель, и пробное ядро.
         runCatching { singbox.Singbox.install(activity.applicationContext) }
+        activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                // Счётчики нужны только видимому экрану: в фоне опрос раз в
+                // секунду будил бы процесс и ядро.
+                _foreground.value = true
+                if (_status.value.isConnected) startPolling()
+            }
+
+            override fun onStop(owner: LifecycleOwner) {
+                _foreground.value = false
+                stopPolling()
+            }
+        })
         scope.launch {
             VeilVpnService.status.collect { service ->
                 _status.value = service.withCounters()
-                if (service.isConnected) startPolling() else stopPolling()
+                if (service.isConnected && _foreground.value) startPolling() else stopPolling()
             }
         }
     }

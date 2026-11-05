@@ -60,8 +60,24 @@ class RoutingConfigTest {
         assertEquals(2, (balancer["selector"] as JsonArray).size)
         assertEquals("bal-0", balancer["fallbackTag"]!!.jsonPrimitive.content)
         assertTrue(config.containsKey("observatory"))
+        assertEquals(
+            "3m",
+            config["observatory"]!!.jsonObject["probeInterval"]!!.jsonPrimitive.content,
+        )
         val lastRule = (routing["rules"] as JsonArray).last().jsonObject
         assertEquals("proxy", lastRule["balancerTag"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun xrayProbesLargeBalancerLessOften() {
+        // Каждая проба — отдельный запрос. На большом списке узлов раз в
+        // минуту это заметный расход батареи, поэтому интервал растёт.
+        val members = (1..21).map { node.copy(id = "m$it", name = "m$it") }
+        val config = json(XrayConfig.json(node, TunnelOptions(balancerMembers = members)))
+        assertEquals(
+            "5m",
+            config["observatory"]!!.jsonObject["probeInterval"]!!.jsonPrimitive.content,
+        )
     }
 
     @Test
@@ -86,6 +102,17 @@ class RoutingConfigTest {
         assertTrue(routeRules.any { it["outbound"]?.jsonPrimitive?.content == "block" })
         val servers = (config["dns"]!!.jsonObject["servers"] as JsonArray).map { it.jsonObject }
         assertTrue(servers.any { it["type"]?.jsonPrimitive?.content == "https" })
+    }
+
+    @Test
+    fun singboxProbesLargeBalancerLessOften() {
+        val members = (1..21).map { node.copy(id = "m$it", name = "m$it") }
+        val config = json(
+            SingboxConfig.build(node, TunnelOptions(balancerMembers = members)).toString(),
+        )
+        val proxy = (config["outbounds"] as JsonArray).map { it.jsonObject }
+            .first { it["tag"]?.jsonPrimitive?.content == "proxy" }
+        assertEquals("5m", proxy["interval"]!!.jsonPrimitive.content)
     }
 
     @Test

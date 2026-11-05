@@ -110,6 +110,7 @@ fun App(container: AppContainer) {
     val scope = rememberCoroutineScope()
     val state = remember(container) { VeilState(container, scope) }
     val status by container.vpn.status.collectAsState()
+    val foreground by container.vpn.foreground.collectAsState()
     // Composable-вызов безусловный: если звать isSystemInDarkTheme() только в
     // ветке SYSTEM, смена темы меняет структуру групп, и Compose сбрасывает
     // всё состояние ниже — вкладка прыгала на «Серверы».
@@ -155,12 +156,14 @@ fun App(container: AppContainer) {
 
         // Единый тикер на всё приложение: таймер в карточке не зависит от того,
         // пересоздалась ли карточка при прокрутке или возврате в приложение.
-        // Тикаем только пока идёт сессия: в покое незачем будить композицию
-        // каждую секунду (на слабых устройствах это заметно).
+        // Тикаем только пока идёт сессия и приложение на экране: в фоне
+        // незачем будить композицию каждую секунду.
         var now by remember { mutableStateOf(currentTimeMillis()) }
-        val ticking = status.isConnected || status.phase == VpnPhase.CONNECTING
+        val ticking = foreground &&
+            (status.isConnected || status.phase == VpnPhase.CONNECTING)
         if (!state.isTv && ticking) {
             LaunchedEffect(ticking) {
+                now = currentTimeMillis()
                 while (true) {
                     delay(if (reduceMotion) 2000 else 1000)
                     now = currentTimeMillis()

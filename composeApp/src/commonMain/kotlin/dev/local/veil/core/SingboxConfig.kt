@@ -131,7 +131,7 @@ object SingboxConfig {
                         put("tag", TAG_PROXY)
                         putJsonArray("outbounds") { balancer.indices.forEach { add("bal-$it") } }
                         put("url", "https://www.gstatic.com/generate_204")
-                        put("interval", "3m")
+                        put("interval", probeIntervalFor(balancer.size))
                         put("tolerance", 50)
                     }
                 } else {

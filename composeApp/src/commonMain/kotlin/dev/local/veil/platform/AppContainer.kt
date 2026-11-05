@@ -29,6 +29,9 @@ data class VpnStatus(
 interface VpnController {
     val status: StateFlow<VpnStatus>
 
+    /** Приложение на экране: в фоне таймеры и счётчики не крутим. */
+    val foreground: StateFlow<Boolean>
+
     /** Версия ядра, если оно собрано в APK. */
     val coreVersion: String?
     val coreAvailable: Boolean

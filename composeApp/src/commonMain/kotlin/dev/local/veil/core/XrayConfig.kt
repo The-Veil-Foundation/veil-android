@@ -212,7 +212,7 @@ object XrayConfig {
                 putJsonObject("observatory") {
                     putJsonArray("subjectSelector") { observed.forEach { add(it) } }
                     put("probeUrl", "https://www.gstatic.com/generate_204")
-                    put("probeInterval", "1m")
+                    put("probeInterval", probeIntervalFor(observed.size))
                     put("enableConcurrency", true)
                 }
             }
@@ -261,6 +261,15 @@ object XrayConfig {
             if (mutable["stats"] !is JsonObject) mutable["stats"] = JsonObject(emptyMap())
             mutable["policy"] = withStatsPolicy(mutable["policy"] as? JsonObject)
         }
+        // Подписки любят проверять выходы каждые 10–30 секунд. Каждая проба —
+        // отдельный HTTPS-запрос через узел, и на мобильной сети это будит
+        // радио чаще, чем нужно для выбора узла.
+        (mutable["observatory"] as? JsonObject)?.let {
+            mutable["observatory"] = withBatteryFriendlyProbes(it, mutable["outbounds"] as? JsonArray)
+        }
+        (mutable["burstObservatory"] as? JsonObject)?.let {
+            mutable["burstObservatory"] = withBatteryFriendlyBurst(it)
+        }
         // Балансировщик панели (leastPing/leastLoad) без fallbackTag
         // выбрасывает соединения до первого замера observatory и тогда,
         // когда все замеры временно упали. Подставляем живой выход.
@@ -280,6 +289,81 @@ object XrayConfig {
         return JsonObject(out)
     }
 
+    private val PROBE_DURATION_PART = Regex("(\\d+)(ms|h|m|s)")
+
+    /** Длительность из конфига Xray (`time.Duration`: "30s", "1m30s") в мс. */
+    private fun parseProbeMillis(value: String?): Long? {
+        if (value.isNullOrBlank()) return null
+        if (value.trim() == "0") return 0
+        var total = 0L
+        var matched = false
+        for (match in PROBE_DURATION_PART.findAll(value)) {
+            matched = true
+            val n = match.groupValues[1].toLongOrNull() ?: return null
+            total += when (match.groupValues[2]) {
+                "h" -> n * 3_600_000
+                "m" -> n * 60_000
+                "s" -> n * 1_000
+                else -> n
+            }
+        }
+        return if (matched) total else null
+    }
+
+    /** Поднимаем слишком частые пробы подписки до безопасного минимума. */
+    private fun withBatteryFriendlyProbes(observatory: JsonObject, outbounds: JsonArray?): JsonObject {
+        val selectors = (observatory["subjectSelector"] as? JsonArray).orEmpty()
+            .mapNotNull { (it as? JsonPrimitive)?.takeIf { value -> value.isString }?.content }
+        // Селектор Xray — префикс тега. Считаем реальные выходы, иначе
+        // «[""]» выглядит как один субъект, а проверяется весь список.
+        val matched = if (selectors.isEmpty()) 0 else {
+            proxyTags(outbounds).count { tag -> selectors.any { tag.startsWith(it) } }
+        }
+        val subjects = matched.takeIf { it > 0 } ?: selectors.size
+        val minimum = probeIntervalSecondsFor(subjects) * 1_000
+        val current = parseProbeMillis((observatory["probeInterval"] as? JsonPrimitive)?.content)
+        if (current != null && current >= minimum) return observatory
+        return JsonObject(
+            observatory.toMutableMap().apply {
+                put("probeInterval", JsonPrimitive(probeIntervalFor(subjects)))
+            },
+        )
+    }
+
+    /**
+     * burstObservatory для leastLoad проверяет выходы пачками: тик раз в
+     * `interval × sampling`. Если панель ставит интервал 10 секунд, суммарно
+     * получается слишком частый опрос — растягиваем его хотя бы до 3 минут.
+     */
+    private fun withBatteryFriendlyBurst(observatory: JsonObject): JsonObject {
+        val ping = observatory["pingConfig"] as? JsonObject ?: return observatory
+        // 0/пусто у Xray означает интервал по умолчанию (1 минута) — не трогаем.
+        val interval = parseProbeMillis((ping["interval"] as? JsonPrimitive)?.content)
+            ?.takeIf { it > 0 } ?: return observatory
+        val sampling = (ping["sampling"] as? JsonPrimitive)?.content?.toIntOrNull()
+            ?.takeIf { it > 0 } ?: 10
+        if (interval * sampling >= 180_000) return observatory
+        val seconds = ((180 + sampling - 1) / sampling).coerceAtLeast(30)
+        return JsonObject(
+            observatory.toMutableMap().apply {
+                put(
+                    "pingConfig",
+                    JsonObject(ping.toMutableMap().apply {
+                        put("interval", JsonPrimitive("${seconds}s"))
+                    }),
+                )
+            },
+        )
+    }
+
+    /** Теги выходов, которые реально несут пользовательский трафик. */
+    private fun proxyTags(outbounds: JsonArray?): List<String> = outbounds.orEmpty().mapNotNull { element ->
+        val outbound = element as? JsonObject ?: return@mapNotNull null
+        val tag = (outbound["tag"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+        val protocol = (outbound["protocol"] as? JsonPrimitive)?.content?.lowercase()
+        if (protocol in NON_PROXY_PROTOCOLS) null else tag
+    }
+
     /** Протоколы, которые не несут пользовательский трафик наружу. */
     private val NON_PROXY_PROTOCOLS = setOf("freedom", "blackhole", "dns", "loopback")
 
@@ -290,12 +374,7 @@ object XrayConfig {
      */
     private fun withBalancerFallback(routing: JsonObject, outbounds: JsonArray?): JsonObject {
         val balancers = routing["balancers"] as? JsonArray ?: return routing
-        val proxyTags = outbounds.orEmpty().mapNotNull { element ->
-            val outbound = element as? JsonObject ?: return@mapNotNull null
-            val tag = (outbound["tag"] as? JsonPrimitive)?.content ?: return@mapNotNull null
-            val protocol = (outbound["protocol"] as? JsonPrimitive)?.content?.lowercase()
-            if (protocol in NON_PROXY_PROTOCOLS) null else tag
-        }
+        val proxyTags = proxyTags(outbounds)
         if (proxyTags.isEmpty()) return routing
 
         var changed = false

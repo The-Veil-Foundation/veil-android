@@ -87,7 +87,8 @@ class SubscriptionConfigArrayTest {
         assertFalse("category-ads" in text)
         val rules = Json.parseToJsonElement(text).jsonObject["routing"]!!.jsonObject["rules"]!!.jsonArray
         assertEquals(3, rules.size)
-        // Балансировщик и observatory остаются как есть.
+        // Балансировщик и observatory остаются; слишком частые пробы подписки
+        // замедляются, чтобы не будить радио каждые 30 секунд.
         assertTrue("balancerTag" in text)
         assertTrue("leastLoad" in text)
     }
@@ -112,6 +113,34 @@ class SubscriptionConfigArrayTest {
         // Первый выход под селектором: до первого замера observatory и при
         // упавших пробах leastLoad иначе возвращает пустой тег.
         assertEquals("A-REALITY", balancer["fallbackTag"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `provider probes are slowed down for battery`() {
+        val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
+        val observatory = config["observatory"]!!.jsonObject
+        // 30s из подписки: каждая проба — HTTPS-запрос через узел.
+        assertEquals("3m", observatory["probeInterval"]!!.jsonPrimitive.content)
+        assertEquals(2, observatory["subjectSelector"]!!.jsonArray.size)
+    }
+
+    @Test
+    fun `provider burst probes are slowed down for battery`() {
+        val withBurst = body.replace(
+            "\"remarks\": \"Тест · Эстония\",",
+            "\"burstObservatory\": { \"subjectSelector\": [\"A-REALITY\"], " +
+                "\"pingConfig\": { \"destination\": \"https://www.gstatic.com/generate_204\", " +
+                "\"interval\": \"10s\", \"sampling\": 3, \"timeout\": \"5s\" } },\n        " +
+                "\"remarks\": \"Тест · Эстония\",",
+        )
+        val parsed = SubscriptionPayload.classify(withBurst)
+        assertIs<SubscriptionPayload.Body.Ok>(parsed)
+        val config = Json.parseToJsonElement(
+            XrayConfig.json(parsed.nodes.single(), TunnelOptions()),
+        ).jsonObject
+        val ping = config["burstObservatory"]!!.jsonObject["pingConfig"]!!.jsonObject
+        // 10s × 3 = 30s между пачками — слишком часто; 180s / 3 = 60s.
+        assertEquals("60s", ping["interval"]!!.jsonPrimitive.content)
     }
 
     @Test

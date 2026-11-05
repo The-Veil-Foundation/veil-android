@@ -57,6 +57,7 @@ class DesktopServerStore : ServerStore {
 class DesktopVpnController : VpnController {
     private val _status = MutableStateFlow(VpnStatus())
     override val status: StateFlow<VpnStatus> = _status.asStateFlow()
+    override val foreground: StateFlow<Boolean> = MutableStateFlow(true)
     override val coreAvailable: Boolean = false
     override val coreVersion: String? = null
 
