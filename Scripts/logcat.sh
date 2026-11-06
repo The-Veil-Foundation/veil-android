@@ -7,7 +7,7 @@
 #   ./Scripts/logcat.sh core       # только строки Go/Xray
 set -uo pipefail
 ADB="$HOME/Android/platform-tools/adb"
-PKG="dev.local.veil"
+PKG="org.veil.app"
 
 case "${1:-app}" in
   all)

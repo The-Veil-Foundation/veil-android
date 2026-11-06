@@ -209,7 +209,7 @@ APK. Ядро есть только под `arm64-v8a` и `x86_64`.
 <summary>Логи</summary>
 
 В приложении: *Настройки → Логи ядра*. Файлы лежат в
-`Android/data/dev.local.veil/files/xray.log` и `xray.config.json`, их можно забрать через
+`Android/data/org.veil.app/files/xray.log` и `xray.config.json`, их можно забрать через
 `adb` (`run-as` на Samsung падает на SELinux). Лог обнуляется при каждом новом подключении.
 
 </details>

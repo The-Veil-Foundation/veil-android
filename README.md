@@ -213,7 +213,7 @@ Step-by-step guide: [`docs/release.md`](docs/release.md) (Russian).
 <summary>Logs</summary>
 
 In the app: *Settings → Core logs*. Files live in
-`Android/data/dev.local.veil/files/xray.log` and `xray.config.json` and can be pulled with
+`Android/data/org.veil.app/files/xray.log` and `xray.config.json` and can be pulled with
 `adb` (`run-as` fails on Samsung due to SELinux). The log is truncated on every new connection.
 
 </details>

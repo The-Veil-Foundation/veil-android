@@ -95,7 +95,7 @@
 | `NEPacketTunnelNetworkSettings` + `excludedRoutes` | `VpnService.Builder` умеет только `addRoute`; исключения делаются через `protect()` |
 | `NWPathMonitor` для смены сети | `ConnectivityManager.NetworkCallback` |
 | `NETunnelProviderSession.sendProviderMessage` | тот же процесс, `StateFlow` |
-| App Group `group.dev.local.veil` | `filesDir` + `SharedPreferences` |
+| App Group `group.org.veil.app` | `filesDir` + `SharedPreferences` |
 | Kill extension при превышении памяти | ядро в основном процессе, лимит не нужен (но Go-память стоит ограничивать) |
 | utun ищется перебором fd | fd приходит прямо из `establish()` |
 
@@ -120,7 +120,7 @@ TCP-пинг показывает только открытый порт, поэ
 cleartext-запросы, и HTTP-проба даёт ложный отказ на любом узле.
 
 ### Логи
-`xray.log` и `xray.config.json` пишутся в `Android/data/dev.local.veil/files/`:
+`xray.log` и `xray.config.json` пишутся в `Android/data/org.veil.app/files/`:
 `run-as` на Samsung падает на SELinux, а этот каталог читается через adb.
 
 ### Перезапуск ядра при смене узла

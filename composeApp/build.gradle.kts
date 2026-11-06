@@ -119,7 +119,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.local.veil"
+        applicationId = "org.veil.app"
         minSdk = 24
         targetSdk = 36
         versionCode = appVersionCode
