@@ -147,10 +147,48 @@ class RoutingParityTest {
     }
 
     @Test
-    fun legacyBypassRuMigratesToThePreset() {
+    fun legacyBypassRuMigratesToTheRussiaList() {
         val migrated = AppSettings(bypassRu = true).migrated()
-        assertEquals(RoutingPreset.BYPASS_RU, migrated.routingPreset)
+        assertEquals(RoutingPreset.BYPASS_LAN, migrated.routingPreset)
+        assertEquals(listOf(RU_INSIDE_LIST), migrated.communityLists)
         assertFalse(migrated.bypassRu)
+    }
+
+    @Test
+    fun hiddenCountryPresetsMigrateToBypassLan() {
+        val ru = AppSettings(settingsVersion = 2, routingPreset = RoutingPreset.BYPASS_RU).migrated()
+        assertEquals(RoutingPreset.BYPASS_LAN, ru.routingPreset)
+        assertEquals(listOf(RU_INSIDE_LIST), ru.communityLists)
+        assertEquals(RuleTarget.Direct, ru.communityListTarget)
+
+        // Список уже включён: не дублируется, выбранная цель не трогается.
+        val kept = AppSettings(
+            settingsVersion = 2,
+            routingPreset = RoutingPreset.BYPASS_RU,
+            communityLists = listOf(RU_INSIDE_LIST),
+            communityListTarget = RuleTarget.Proxy,
+        ).migrated()
+        assertEquals(listOf(RU_INSIDE_LIST), kept.communityLists)
+        assertEquals(RuleTarget.Proxy, kept.communityListTarget)
+
+        val cn = AppSettings(settingsVersion = 2, routingPreset = RoutingPreset.BYPASS_CHINA).migrated()
+        assertEquals(RoutingPreset.BYPASS_LAN, cn.routingPreset)
+        assertTrue(cn.communityLists.isEmpty())
+
+        assertEquals(cn, cn.migrated())
+        assertTrue(RoutingPreset.selectable.none { it == RoutingPreset.BYPASS_RU || it == RoutingPreset.BYPASS_CHINA })
+    }
+
+    @Test
+    fun geoAssetsAreNeededOnlyForGeoFeatures() {
+        assertFalse(AppSettings().needsGeoAssets)
+        assertTrue(AppSettings(blockAds = true).needsGeoAssets)
+        assertTrue(
+            AppSettings(customRules = listOf(RoutingRule(name = "cn", domains = listOf("geosite:cn")))).needsGeoAssets,
+        )
+        assertFalse(
+            AppSettings(customRules = listOf(RoutingRule(name = "ex", domains = listOf("domain:example.com")))).needsGeoAssets,
+        )
     }
 
     @Test

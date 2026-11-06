@@ -251,7 +251,8 @@ fun StatusCard(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp),
+                    .height(54.dp)
+                    .tvFocusRing(MaterialTheme.shapes.large),
             ) {
                 AnimatedContent(
                     targetState = label,

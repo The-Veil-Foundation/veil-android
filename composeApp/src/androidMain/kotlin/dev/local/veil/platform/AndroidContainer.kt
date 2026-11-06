@@ -198,7 +198,9 @@ class AndroidVpnController(
             val probeLog = logFile.takeIf { it.isNotEmpty() }?.let { "$it.probe" }
             val effective = options.forProbe().copy(
                 logFile = probeLog,
-                logLevel = "debug",
+                // Пинг списка поднимает ядро на каждый узел: debug писал бы
+                // сотни строк на диск за проход. Ошибки warning всё равно видны.
+                logLevel = "warning",
                 geoAvailable = hasGeoAssets(),
             )
             val engine = engineFor(server, effective)
@@ -599,15 +601,27 @@ class AndroidServerStore(context: Context) : ServerStore {
 class AndroidLogProvider(private val file: java.io.File) : LogProvider {
     override val path: String get() = file.absolutePath
 
-    override suspend fun read(): String = withContext(Dispatchers.IO) {
-        runCatching {
-            if (!file.exists()) return@runCatching "Лог пока пуст: ядро ещё не запускалось."
-            file.readLines().takeLast(400).joinToString("\n")
-        }.getOrElse { "Не удалось прочитать лог: ${it.message}" }
-    }
+    /** Пробное ядро пишет рядом, в свой файл: два ядра в одном файле мешали бы друг другу. */
+    private val checks = java.io.File(file.path + ".probe")
+
+    override suspend fun read(): String = tail(file)
 
     override fun clear() {
         runCatching { file.writeText("") }
+    }
+
+    override suspend fun readChecks(): String = tail(checks)
+
+    override fun clearChecks() {
+        runCatching { checks.writeText("") }
+    }
+
+    /** Хвост файла: пустой файл — пустая строка, экран сам скажет, что логов нет. */
+    private suspend fun tail(source: java.io.File): String = withContext(Dispatchers.IO) {
+        runCatching {
+            if (!source.exists()) return@runCatching ""
+            source.readLines().takeLast(2000).joinToString("\n")
+        }.getOrElse { "Не удалось прочитать лог: ${it.message}" }
     }
 }
 
@@ -623,6 +637,18 @@ class AndroidContainer(activity: ComponentActivity) : AppContainer {
     override val store: ServerStore = AndroidServerStore(activity.applicationContext)
     override val settings: SettingsStore = AndroidSettingsStore(activity.applicationContext)
     override val vpn: VpnController = AndroidVpnController(activity, geoDir, logPath, settings)
+
+    override fun checkConfig(engine: dev.local.veil.core.CoreEngine, configJson: String): Result<Unit>? {
+        val result = when (engine) {
+            dev.local.veil.core.CoreEngine.SING_BOX ->
+                if (SingboxBridge.available) SingboxBridge.checkConfig(configJson) else return null
+            else -> if (XrayBridge.available) XrayBridge.checkConfig(configJson) else return null
+        }
+        // Мост зовёт ядро через reflection: настоящая причина лежит внутри.
+        return result.recoverCatching { error ->
+            throw (error as? java.lang.reflect.InvocationTargetException)?.targetException ?: error
+        }
+    }
     override val logs: LogProvider = AndroidLogProvider(java.io.File(logPath))
     override val transfer: TransferService = AndroidTransferService(activity.applicationContext)
     override val update: UpdateService = AndroidUpdateService(activity.applicationContext)

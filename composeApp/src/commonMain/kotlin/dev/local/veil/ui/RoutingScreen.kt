@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -41,11 +42,9 @@ import dev.local.veil.core.CommunityCatalog
 import dev.local.veil.core.CommunityCategory
 import dev.local.veil.core.CommunityList
 import dev.local.veil.core.DnsServerEntry
-import dev.local.veil.core.GeoAssetSource
 import dev.local.veil.core.DnsServerKind
 import dev.local.veil.core.DnsSettings
 import dev.local.veil.core.DnsRule
-import dev.local.veil.core.RuleSetRef
 import dev.local.veil.core.GroupKind
 import dev.local.veil.core.RoutingPreset
 import dev.local.veil.core.RoutingRule
@@ -56,7 +55,7 @@ import dev.local.veil.core.TargetKind
 import dev.local.veil.core.newId
 import dev.local.veil.platform.PlatformBackHandler
 
-private enum class RoutingPage { HOME, RULES, COMMUNITY, DNS, GROUPS, RULE_SETS }
+private enum class RoutingPage { HOME, RULES, COMMUNITY, DNS, GROUPS }
 
 /**
  * Маршрутизация: пресет, правила, группы серверов и DNS.
@@ -66,6 +65,9 @@ private enum class RoutingPage { HOME, RULES, COMMUNITY, DNS, GROUPS, RULE_SETS 
 fun RoutingScreen(
     state: VeilState,
     modifier: Modifier = Modifier,
+    // Позиция главной страницы держится снаружи: переход в правила или DNS
+    // и обратно не должен отматывать её наверх.
+    homeScroll: ScrollState = rememberScrollState(),
 ) {
     var page by remember { mutableStateOf(RoutingPage.HOME) }
 
@@ -85,12 +87,11 @@ fun RoutingScreen(
         label = "routing-page",
     ) { current ->
         when (current) {
-            RoutingPage.HOME -> RoutingHome(state, modifier, onOpen = { page = it })
+            RoutingPage.HOME -> RoutingHome(state, modifier, homeScroll, onOpen = { page = it })
             RoutingPage.RULES -> RulesPage(state, modifier, onBack = { page = RoutingPage.HOME })
             RoutingPage.COMMUNITY -> CommunityPage(state, modifier, onBack = { page = RoutingPage.HOME })
             RoutingPage.DNS -> DnsPage(state, modifier, onBack = { page = RoutingPage.HOME })
             RoutingPage.GROUPS -> GroupsPage(state, modifier, onBack = { page = RoutingPage.HOME })
-            RoutingPage.RULE_SETS -> RuleSetsPage(state, modifier, onBack = { page = RoutingPage.HOME })
         }
     }
 }
@@ -103,13 +104,14 @@ fun RoutingScreen(
 private fun RoutingHome(
     state: VeilState,
     modifier: Modifier,
+    scroll: ScrollState,
     onOpen: (RoutingPage) -> Unit,
 ) {
     val settings = state.settings
     Column(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -121,7 +123,7 @@ private fun RoutingHome(
                     SegmentChoice(
                         title = tr("Режим", "Mode"),
                         subtitle = routingPresetSubtitle(settings.routingPreset),
-                        options = RoutingPreset.entries.map { preset ->
+                        options = RoutingPreset.selectable.map { preset ->
                             SegmentOption(routingPresetTitle(preset), settings.routingPreset == preset) {
                                 state.saveRouting(preset, settings.customRules, settings.blockAds)
                             }
@@ -205,78 +207,6 @@ private fun RoutingHome(
                     )
                 },
             ),
-        )
-
-        SettingsGroup(
-            title = tr("База правил", "Rule database"),
-            icon = AppIcons.Box,
-            rows = buildList<@Composable () -> Unit> {
-                addAll(listOf(
-                {
-                    SegmentChoice(
-                        title = tr("Источник", "Source"),
-                        subtitle = settings.geoSource.title,
-                        options = GeoAssetSource.entries.map { source ->
-                            SegmentOption(
-                                if (source == GeoAssetSource.CUSTOM) tr("Свои URL", "Custom URLs") else source.title,
-                                settings.geoSource == source,
-                            ) {
-                                state.saveSettings(settings.copy(geoSource = source))
-                            }
-                        },
-                    )
-                },
-                ))
-                if (settings.geoSource == GeoAssetSource.CUSTOM) {
-                    addAll(listOf(
-                    {
-                        SegmentInput(
-                            value = settings.customGeoipUrl,
-                            onValueChange = { state.saveSettings(state.settings.copy(customGeoipUrl = it.trim())) },
-                            label = "geoip.dat URL",
-                        )
-                    },
-                    {
-                        SegmentInput(
-                            value = settings.customGeositeUrl,
-                            onValueChange = { state.saveSettings(state.settings.copy(customGeositeUrl = it.trim())) },
-                            label = "geosite.dat URL",
-                        )
-                    },
-                    ))
-                }
-                addAll(listOf(
-                {
-                    SegmentAction(
-                        title = if (settings.ruleSets.isEmpty()) {
-                            "Rule-set"
-                        } else {
-                            "Rule-set: ${settings.ruleSets.size}"
-                        },
-                        subtitle = tr(
-                            "Свои наборы для sing-box. geosite:/geoip: из правил подключаются сами.",
-                            "Your own sing-box sets. geosite:/geoip: from rules are added automatically.",
-                        ),
-                        onClick = { onOpen(RoutingPage.RULE_SETS) },
-                    )
-                },
-                {
-                    SegmentAction(
-                        title = when {
-                            state.geoBusy -> tr("Скачиваем…", "Downloading…")
-                            state.geoAvailable -> tr("База загружена", "Database downloaded")
-                            else -> tr("Скачать базу", "Download database")
-                        },
-                        subtitle = if (state.geoAvailable) {
-                            tr("geosite:/geoip: работают", "geosite:/geoip: ready")
-                        } else {
-                            tr("Нужна для блокировки рекламы и geo-правил", "Required for ad blocking and geo rules")
-                        },
-                        onClick = { state.downloadGeo() },
-                    )
-                },
-                ))
-            },
         )
 
         Spacer(Modifier.height(20.dp))
@@ -963,77 +893,6 @@ private fun GroupDialog(
 /* ------------------------------------------------------------------ */
 /* Общие части                                                         */
 /* ------------------------------------------------------------------ */
-
-/* ------------------------------------------------------------------ */
-/* Rule-set                                                            */
-/* ------------------------------------------------------------------ */
-
-@Composable
-private fun RuleSetsPage(state: VeilState, modifier: Modifier, onBack: () -> Unit) {
-    val settings = state.settings
-    var editing by remember { mutableStateOf<RuleSetRef?>(null) }
-    var creating by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        PageHeader(
-            title = "Rule-set",
-            subtitle = tr("Наборы правил sing-box", "sing-box rule-sets"),
-            onBack = onBack,
-        )
-        EmptyHint(
-            tr(
-                "geosite:/geoip: из правил превращаются в rule-set сами. Здесь — свои наборы; на них ссылаются по тегу в поле «Теги rule-set» правила.",
-                "geosite:/geoip: entries become rule-sets on their own. Add your own here and refer to them by tag in a rule's Rule-set tags field.",
-            ),
-        )
-        if (settings.ruleSets.isNotEmpty()) {
-            SegmentedGroup(
-                rows = settings.ruleSets.map { ref ->
-                    {
-                        SegmentAction(
-                            title = ref.tag.ifBlank { tr("Без тега", "No tag") },
-                            subtitle = if (ref.kind == RuleSetRef.Kind.REMOTE) ref.url else ref.path,
-                            onClick = { editing = ref },
-                        )
-                    }
-                },
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        AddButton(text = tr("Добавить rule-set", "Add rule-set")) { creating = true }
-        Spacer(Modifier.height(20.dp))
-    }
-
-    if (creating || editing != null) {
-        val ref = editing ?: RuleSetRef(tag = "")
-        RuleSetDialog(
-            initial = ref,
-            isNew = creating,
-            onDismiss = { creating = false; editing = null },
-            onSave = { saved ->
-                val list = settings.ruleSets.toMutableList()
-                val index = list.indexOfFirst { it.id == saved.id }
-                if (saved.tag.isNotBlank()) {
-                    if (index >= 0) list[index] = saved else list += saved
-                    state.saveSettings(settings.copy(ruleSets = list))
-                }
-                creating = false
-                editing = null
-            },
-            onDelete = {
-                state.saveSettings(settings.copy(ruleSets = settings.ruleSets.filterNot { it.id == ref.id }))
-                creating = false
-                editing = null
-            },
-        )
-    }
-}
 
 @Composable
 private fun PageHeader(title: String, subtitle: String, onBack: () -> Unit) {

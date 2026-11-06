@@ -1,5 +1,7 @@
 package dev.local.veil.ui
 
+import androidx.compose.foundation.layout.widthIn
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.LocalIndication
@@ -105,8 +107,8 @@ fun ServersScreen(
 ) {
     // Пустой список — отдельный экран: карточка подключения, поиск, фильтры и
     // пинг без единого узла только мешают и выглядят сломанными.
-    if (state.servers.isEmpty() && !state.isTv) {
-        EmptyServers(onAdd = onAdd, onOpenReceive = onOpenReceive, modifier = modifier)
+    if (state.servers.isEmpty()) {
+        EmptyServers(onAdd = onAdd, onOpenReceive = onOpenReceive, modifier = modifier, tv = state.isTv)
         return
     }
     // «Сначала быстрые» — сортировка по последнему замеру. Пока идёт пинг,
@@ -258,22 +260,6 @@ fun ServersScreen(
                     modifier = Modifier.staggerIn(seen, "empty", 0).padding(top = 40.dp, start = 24.dp, end = 24.dp),
                 )
             }
-            // На приставке камеры нет: подписки приезжают с телефона по QR.
-            if (state.servers.isEmpty() && state.isTv) {
-                item(key = "receive-cta") {
-                    Button(
-                        onClick = onOpenReceive,
-                        shape = Md3Shapes.card,
-                        modifier = Modifier
-                            .staggerIn(seen, "cta", 1)
-                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                    ) {
-                        AppIcon(AppIcons.Qr, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.size(8.dp))
-                        Text(tr("Принять с телефона по QR", "Receive from phone via QR"), fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
         } else {
             groups.forEachIndexed { groupIndex, group ->
                 val expanded = group.key !in collapsed
@@ -397,12 +383,19 @@ fun ServersScreen(
 
 /** Первый запуск: ни одного узла. Одна понятная точка входа вместо пустого списка. */
 @Composable
-private fun EmptyServers(onAdd: () -> Unit, onOpenReceive: () -> Unit, modifier: Modifier) {
+private fun EmptyServers(onAdd: () -> Unit, onOpenReceive: () -> Unit, modifier: Modifier, tv: Boolean = false) {
+    // На приставке нет камеры и неудобно печатать: главное действие — принять
+    // подписку с телефона по QR, ссылка вручную — запасной путь.
+    val primary = remember { androidx.compose.ui.focus.FocusRequester() }
+    if (tv) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { runCatching { primary.requestFocus() } }
+    }
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
+        modifier = Modifier
+            .widthIn(max = 460.dp)
             .padding(horizontal = 32.dp)
-            .padding(bottom = 96.dp),
+            .padding(bottom = if (tv) 0.dp else 96.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -424,30 +417,41 @@ private fun EmptyServers(onAdd: () -> Unit, onOpenReceive: () -> Unit, modifier:
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            tr(
-                "Добавьте ссылку на подписку или отдельный узел — они появятся здесь.",
-                "Add a subscription link or a single server and it will show up here.",
-            ),
+            if (tv) {
+                tr(
+                    "Отсканируйте QR телефоном с Veil — подписки приедут сюда. Или введите ссылку пультом.",
+                    "Scan the QR with Veil on your phone and the subscriptions arrive here. Or type a link with the remote.",
+                )
+            } else {
+                tr(
+                    "Добавьте ссылку на подписку или отдельный узел — они появятся здесь.",
+                    "Add a subscription link or a single server and it will show up here.",
+                )
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         Spacer(Modifier.height(28.dp))
         Button(
-            onClick = onAdd,
+            onClick = if (tv) onOpenReceive else onAdd,
             shape = CircleShape,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(56.dp).tvFocusRing(CircleShape).focusRequester(primary),
         ) {
-            AppIcon(AppIcons.Add, modifier = Modifier.size(20.dp))
+            AppIcon(if (tv) AppIcons.Qr else AppIcons.Add, modifier = Modifier.size(20.dp))
             Spacer(Modifier.size(8.dp))
-            Text(tr("Добавить подписку", "Add subscription"), fontWeight = FontWeight.Bold)
+            Text(
+                if (tv) tr("Принять с телефона", "Receive from phone") else tr("Добавить подписку", "Add subscription"),
+                fontWeight = FontWeight.Bold,
+            )
         }
         Spacer(Modifier.height(10.dp))
-        TextButton(onClick = onOpenReceive, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            AppIcon(AppIcons.Qr, modifier = Modifier.size(18.dp))
+        TextButton(onClick = if (tv) onAdd else onOpenReceive, modifier = Modifier.fillMaxWidth().height(48.dp).tvFocusRing(CircleShape)) {
+            AppIcon(if (tv) AppIcons.Add else AppIcons.Qr, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(8.dp))
-            Text(tr("Принять с другого устройства", "Receive from another device"))
+            Text(if (tv) tr("Ввести ссылку", "Enter a link") else tr("Принять с другого устройства", "Receive from another device"))
         }
+    }
     }
 }
 

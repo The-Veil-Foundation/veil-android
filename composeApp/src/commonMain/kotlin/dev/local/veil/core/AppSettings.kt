@@ -116,6 +116,12 @@ data class AppSettings(
     val splitMode: SplitMode = SplitMode.OFF,
     val splitPackages: Set<String> = emptySet(),
     val liveNotification: Boolean = true,
+    /**
+     * Вкладка «Источники» в нижней навигации, как `showSourcesTab` на macOS.
+     * По умолчанию спрятана: подписки настраивают один раз, а ряд «Подписки»
+     * в настройках открывает ту же страницу.
+     */
+    val showSourcesTab: Boolean = false,
     /** 0 — только вручную. */
     val autoRefreshHours: Int = 0,
     val logLevel: String = "warning",
@@ -188,6 +194,16 @@ data class AppSettings(
         return head + TUNNEL_EXCLUDE + rules.drop(addressed)
     }
 
+    /**
+     * Нужна ли geo-база (geoip.dat/geosite.dat): блокировка рекламы или своё
+     * правило с `geosite:`/`geoip:`. Кнопки скачивания больше нет, поэтому
+     * база подтягивается сама, когда что-то из этого включено.
+     */
+    val needsGeoAssets: Boolean
+        get() = blockAds || routingPreset.needsGeoAssets || customRules.any { rule ->
+            rule.domains.any { it.startsWith("geosite:") } || rule.ips.any { it.startsWith("geoip:") }
+        }
+
     /** User-Agent, который реально уходит в запросах подписки. */
     val effectiveUserAgent: String
         get() = effectiveUserAgent(userAgent)
@@ -206,12 +222,26 @@ data class AppSettings(
                 else communityListTarget,
             ).migrated()
         }
-        if (!bypassRu) return this
-        val preset = when (routingPreset) {
-            RoutingPreset.GLOBAL, RoutingPreset.BYPASS_LAN -> RoutingPreset.BYPASS_RU
-            else -> routingPreset
+        // Старый флаг «российские домены напрямую» значит то же, что пресет
+        // BYPASS_RU, и переносится тем же путём.
+        if (bypassRu) {
+            val preset = when (routingPreset) {
+                RoutingPreset.GLOBAL, RoutingPreset.BYPASS_LAN -> RoutingPreset.BYPASS_RU
+                else -> routingPreset
+            }
+            return copy(bypassRu = false, routingPreset = preset).migrated()
         }
-        return copy(bypassRu = false, routingPreset = preset)
+        return when (routingPreset) {
+            // Россию напрямую теперь ведёт готовый список «Россия внутри».
+            RoutingPreset.BYPASS_RU -> copy(
+                routingPreset = RoutingPreset.BYPASS_LAN,
+                communityLists = if (RU_INSIDE_LIST in communityLists) communityLists
+                else communityLists + RU_INSIDE_LIST,
+                communityListTarget = if (communityLists.isEmpty()) RuleTarget.Direct else communityListTarget,
+            )
+            RoutingPreset.BYPASS_CHINA -> copy(routingPreset = RoutingPreset.BYPASS_LAN)
+            else -> this
+        }
     }
 
     /**
@@ -259,6 +289,9 @@ data class AppSettings(
         )
     }
 }
+
+/** Готовый список, которым заменён пресет «Россия напрямую». */
+const val RU_INSIDE_LIST = "ru-inside"
 
 /** Значения User-Agent, которые прежние сборки записывали по умолчанию. */
 val LEGACY_DEFAULT_USER_AGENTS = setOf("Veil/0.1")

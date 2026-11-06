@@ -3,7 +3,10 @@ package dev.local.veil
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
+import dev.local.veil.core.IncomingLinks
+import dev.local.veil.core.Pairing
 import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,6 +32,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val container = AndroidContainer(this)
+        acceptLink(intent)
         setContent { App(container) }
 
         // У телевизора нет шторки уведомлений; запрос разрешения только
@@ -39,5 +43,23 @@ class MainActivity : ComponentActivity() {
         ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        acceptLink(intent)
+    }
+
+    /**
+     * veil://pair?u=<адрес приёма>: телефон открыл страницу приставки и нажал
+     * «Открыть в Veil». Берём только настоящий адрес приёма в локальной сети,
+     * дальше приложение само спросит, что отправить.
+     */
+    private fun acceptLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (intent.action != Intent.ACTION_VIEW || data.scheme != "veil" || data.host != "pair") return
+        val address = data.getQueryParameter("u")?.let { Pairing.parse(it) } ?: return
+        IncomingLinks.offer(address)
     }
 }

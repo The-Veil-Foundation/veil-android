@@ -30,7 +30,6 @@ import dev.local.veil.core.ProxyConfig
 import dev.local.veil.core.RoutingPreset
 import dev.local.veil.core.RoutingRule
 import dev.local.veil.core.RuleDirection
-import dev.local.veil.core.RuleSetRef
 import dev.local.veil.core.RuleTarget
 import dev.local.veil.core.ServerGroup
 import dev.local.veil.core.TargetKind
@@ -470,107 +469,6 @@ internal val ruleTemplates: List<RuleTemplate> = listOf(
         RoutingRule(name = "LAN direct", target = RuleTarget.Direct, ips = RoutingPreset.PRIVATE_CIDRS)
     },
 )
-
-/* ------------------------------------------------------------------ */
-/* Rule-set — ручные наборы sing-box                                   */
-/* ------------------------------------------------------------------ */
-
-@Composable
-internal fun RuleSetDialog(
-    initial: RuleSetRef,
-    isNew: Boolean,
-    onDismiss: () -> Unit,
-    onSave: (RuleSetRef) -> Unit,
-    onDelete: () -> Unit,
-) {
-    var tag by remember { mutableStateOf(initial.tag) }
-    var kind by remember { mutableStateOf(initial.kind) }
-    var format by remember { mutableStateOf(initial.format) }
-    var url by remember { mutableStateOf(initial.url) }
-    var path by remember { mutableStateOf(initial.path) }
-    var interval by remember { mutableStateOf(initial.updateInterval) }
-    var detour by remember { mutableStateOf(initial.downloadDetour) }
-
-    EditorDialog(
-        title = if (isNew) tr("Новый rule-set", "New rule-set") else "Rule-set",
-        onDismiss = onDismiss,
-        onDelete = if (isNew) null else onDelete,
-        onSave = {
-            onSave(
-                initial.copy(
-                    tag = tag.trim(),
-                    kind = kind,
-                    format = format,
-                    url = url.trim(),
-                    path = path.trim(),
-                    updateInterval = interval.trim(),
-                    downloadDetour = detour,
-                ),
-            )
-        },
-    ) {
-        OutlinedTextField(
-            colors = veilFieldColors(),
-            value = tag,
-            onValueChange = { tag = it },
-            label = { Text(tr("Тег (на него ссылаются правила)", "Tag (rules refer to it)")) },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        ChipRow(
-            title = tr("Источник", "Source"),
-            options = listOf(
-                tr("Удалённый", "Remote") to (kind == RuleSetRef.Kind.REMOTE),
-                tr("Локальный", "Local") to (kind == RuleSetRef.Kind.LOCAL),
-            ),
-        ) { index -> kind = if (index == 0) RuleSetRef.Kind.REMOTE else RuleSetRef.Kind.LOCAL }
-        ChipRow(
-            title = tr("Формат", "Format"),
-            options = listOf(
-                "Binary (.srs)" to (format == RuleSetRef.Format.BINARY),
-                "Source (.json)" to (format == RuleSetRef.Format.SOURCE),
-            ),
-        ) { index -> format = if (index == 0) RuleSetRef.Format.BINARY else RuleSetRef.Format.SOURCE }
-        if (kind == RuleSetRef.Kind.REMOTE) {
-            OutlinedTextField(
-                colors = veilFieldColors(),
-                value = url,
-                onValueChange = { url = it },
-                label = { Text("URL") },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                colors = veilFieldColors(),
-                value = interval,
-                onValueChange = { interval = it },
-                label = { Text(tr("Обновлять каждые (1d, 12h)", "Update every (1d, 12h)")) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            ChipRow(
-                title = tr("Скачивать через", "Download via"),
-                options = listOf(
-                    tr("Напрямую", "Direct") to (detour == "direct"),
-                    tr("Прокси", "Proxy") to (detour == "proxy"),
-                ),
-            ) { index -> detour = if (index == 0) "direct" else "proxy" }
-        } else {
-            OutlinedTextField(
-                colors = veilFieldColors(),
-                value = path,
-                onValueChange = { path = it },
-                label = { Text(tr("Путь к файлу", "File path")) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
 
 /* ------------------------------------------------------------------ */
 /* DNS-правило — порт DNSRule                                          */

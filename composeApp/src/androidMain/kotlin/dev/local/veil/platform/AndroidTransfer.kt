@@ -47,9 +47,14 @@ class AndroidTransferService(private val context: Context) : TransferService {
     }
 
     override fun startReceiving(onReceived: (TransferPayload) -> Unit): ReceiveSession? {
-        val address = lanAddress() ?: return null
+        // Эмулятор сидит за NAT Мака и видит только 10.0.2.15, до которого
+        // телефон не дойдёт. Для проверки адрес и порт подменяются снаружи:
+        // adb shell setprop debug.veil.pair_host 192.168.x.y (+ pair_port).
+        // Свойства debug.* ставит только adb, обычному пользователю они пусты.
+        val address = systemProperty("debug.veil.pair_host") ?: lanAddress() ?: return null
+        val fixedPort = systemProperty("debug.veil.pair_port")?.toIntOrNull() ?: 0
         val token = randomToken()
-        val server = runCatching { PairServer(token, onReceived) }.getOrNull() ?: return null
+        val server = runCatching { PairServer(token, onReceived, fixedPort) }.getOrNull() ?: return null
         server.start()
         return ReceiveSession("http://$address:${server.port}/pair/$token") { server.stop() }
     }
@@ -88,6 +93,10 @@ class AndroidTransferService(private val context: Context) : TransferService {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
+    private fun systemProperty(name: String): String? = runCatching {
+        Runtime.getRuntime().exec(arrayOf("getprop", name)).inputStream.bufferedReader().use { it.readText().trim() }
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
+
     /** Адрес в домашней сети; VPN-интерфейсы и мобильные пропускаем. */
     private fun lanAddress(): String? = runCatching {
         NetworkInterface.getNetworkInterfaces().toList()
@@ -110,8 +119,12 @@ class AndroidTransferService(private val context: Context) : TransferService {
 private class PairServer(
     private val token: String,
     private val onPayload: (TransferPayload) -> Unit,
+    port: Int = 0,
 ) {
-    private val socket = ServerSocket(0, 8)
+    private val socket = ServerSocket().apply {
+        reuseAddress = true
+        bind(InetSocketAddress(port), 8)
+    }
 
     @Volatile
     private var running = true
@@ -186,12 +199,12 @@ private class PairServer(
                 }
                 val payload = parsePayload(String(body, 0, read, Charsets.UTF_8), contentType)
                 if (payload == null || payload.isEmpty) {
-                    respond(client, 400, "text/html; charset=utf-8", RESULT.replace("{{msg}}", "Ничего не распознано. Нужны ссылки на подписки или vless://, vmess://… ссылки."))
+                    respond(client, 400, "text/html; charset=utf-8", result(false, "Ничего не распознано", "Нужна ссылка на подписку или ссылки vless://, vmess://… по одной в строке."))
                 } else {
                     onPayload(payload)
                     respond(
                         client, 200, "text/html; charset=utf-8",
-                        RESULT.replace("{{msg}}", "Готово: подписок ${payload.subscriptions.size}, серверов ${payload.servers.size}. Можно закрыть страницу."),
+                        result(true, "Отправлено", "Подписок: ${payload.subscriptions.size}, серверов: ${payload.servers.size}. Посмотрите на телевизор — страницу можно закрыть."),
                     )
                 }
             }
@@ -245,21 +258,17 @@ private class PairServer(
     private companion object {
         const val MAX_BODY = 256 * 1024
 
-        const val STYLE = "body{font-family:system-ui,sans-serif;margin:0;padding:24px;max-width:560px;margin:auto;" +
-            "background:#0f172a;color:#e2e8f0}h1{font-size:22px}textarea{width:100%;height:180px;box-sizing:border-box;" +
-            "border-radius:16px;border:1px solid #475569;background:#1e293b;color:#e2e8f0;padding:12px;font-size:15px}" +
-            "button{margin-top:12px;width:100%;padding:14px;border:0;border-radius:999px;background:#7dd3fc;color:#0c4a6e;" +
-            "font-size:16px;font-weight:700}p{color:#94a3b8}"
+        const val PAGE = "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Veil</title><style>:root{color-scheme:light dark;--bg:#f9f9ff;--surface:#ffffff;--surface2:#eef0f9;--on:#191c20;--muted:#44474e;--outline:#c4c6d0;--primary:#4a5c92;--on-primary:#ffffff;--tonal:#dbe1ff;--on-tonal:#32457a;--error:#ba1a1a;--ok:#2e6b2e}@media(prefers-color-scheme:dark){:root{--bg:#111318;--surface:#1d2024;--surface2:#272a2f;--on:#e2e2e9;--muted:#c4c6d0;--outline:#44474e;--primary:#b4c5ff;--on-primary:#1a2d60;--tonal:#32457a;--on-tonal:#dbe1ff;--error:#ffb4ab;--ok:#a3d39b}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--on);font:16px/1.5 Roboto,\"Google Sans\",system-ui,-apple-system,sans-serif;-webkit-tap-highlight-color:transparent}main{max-width:520px;margin:0 auto;padding:28px 16px 40px}.brand{display:flex;align-items:center;gap:12px;margin-bottom:20px}.logo{width:44px;height:44px;border-radius:14px;background:var(--tonal);display:grid;place-items:center}.logo svg{width:24px;height:24px;fill:var(--on-tonal)}.brand b{font-size:15px;letter-spacing:.2px;color:var(--muted);font-weight:500}h1{font-size:28px;line-height:36px;font-weight:600;margin:0 0 8px}.lead{color:var(--muted);margin:0 0 24px}.card{background:var(--surface);border-radius:28px;padding:20px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.08)}@media(prefers-color-scheme:dark){.card{box-shadow:none;background:var(--surface)}}.card h2{font-size:18px;font-weight:600;margin:0 0 4px}.card p{color:var(--muted);margin:0 0 16px;font-size:14px}.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:56px;border:0;border-radius:999px;font:600 16px/1 inherit;font-family:inherit;text-decoration:none;cursor:pointer;transition:transform .12s,filter .12s}.btn:active{transform:scale(.98);filter:brightness(.92)}.filled{background:var(--primary);color:var(--on-primary)}.tonal{background:var(--tonal);color:var(--on-tonal)}textarea{width:100%;min-height:140px;resize:vertical;border:1px solid var(--outline);border-radius:16px;background:transparent;color:var(--on);padding:14px 16px;font:14px/1.45 ui-monospace,\"Roboto Mono\",monospace;margin-bottom:12px;outline:none}textarea:focus{border:2px solid var(--primary);padding:13px 15px}.note{display:flex;gap:10px;align-items:flex-start;color:var(--muted);font-size:13px;margin-top:20px;padding:0 4px}.note svg{flex:none;width:18px;height:18px;fill:var(--muted);margin-top:2px}.state{text-align:center;padding:32px 20px}.state .icon{width:72px;height:72px;border-radius:24px;margin:0 auto 16px;display:grid;place-items:center;background:var(--tonal)}.state .icon svg{width:36px;height:36px;fill:var(--on-tonal)}.state.err .icon{background:color-mix(in srgb,var(--error) 18%,transparent)}.state.err .icon svg{fill:var(--error)}[hidden]{display:none!important}</style></head><body><main><div class=\"brand\"><div class=\"logo\"><svg viewBox=\"0 0 24 24\"><path d=\"M12 2 4 5v6c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5V5l-8-3zm0 2.2 6 2.25V11c0 4.15-2.55 8.1-6 9.4V4.2z\"/></svg></div><b>Veil</b></div><h1>Перенос на приставку</h1><p class=\"lead\">Отправьте подписки с этого телефона на телевизор.</p><section class=\"card\" id=\"app\" hidden><h2>Veil на этом телефоне</h2><p>Откроется приложение и спросит, какие подписки отправить.</p><a class=\"btn filled\" id=\"open\" href=\"#\"><svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"currentColor\"><path d=\"M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zm5 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7z\"/></svg>Открыть в Veil</a></section><section class=\"card\"><h2 id=\"or\">Вставьте ссылку</h2><p>Ссылка на подписку или ссылки серверов, по одной в строке.</p><form method=\"post\"><textarea name=\"data\" placeholder=\"https://…&#10;vless://…\" spellcheck=\"false\" autocapitalize=\"off\"></textarea><button class=\"btn tonal\" type=\"submit\">Отправить на приставку</button></form></section><div class=\"note\"><svg viewBox=\"0 0 24 24\"><path d=\"M12 1a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V6a5 5 0 0 0-5-5zm-3 8V6a3 3 0 1 1 6 0v3H9z\"/></svg><span>Данные идут напрямую на приставку в вашей сети, без интернета. Адрес работает, пока на телевизоре открыт экран приёма.</span></div></main><script>(function(){var ua=navigator.userAgent;if(!/Android/i.test(ua))return;var here=location.href.split('#')[0];var intent='intent://pair?u='+encodeURIComponent(here)+'#Intent;scheme=veil;package=org.veil.app;S.browser_fallback_url='+encodeURIComponent(here+'#manual')+';end';var card=document.getElementById('app'),btn=document.getElementById('open');btn.href=intent;card.hidden=false;document.getElementById('or').textContent='Или вставьте ссылку';if(location.hash!=='#manual'){try{location.href=intent}catch(e){}}})()</script></body></html>"
 
-        const val PAGE = "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">" +
-            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Veil</title>" +
-            "<style>$STYLE</style></head><body><h1>Veil: перенос на эту приставку</h1>" +
-            "<p>Вставьте ссылку на подписку или ссылки серверов, по одной в строке.</p>" +
-            "<form method=\"post\"><textarea name=\"data\" placeholder=\"https://…\" autofocus></textarea>" +
-            "<button type=\"submit\">Отправить</button></form></body></html>"
+        private const val RESULT = "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Veil</title><style>:root{color-scheme:light dark;--bg:#f9f9ff;--surface:#ffffff;--surface2:#eef0f9;--on:#191c20;--muted:#44474e;--outline:#c4c6d0;--primary:#4a5c92;--on-primary:#ffffff;--tonal:#dbe1ff;--on-tonal:#32457a;--error:#ba1a1a;--ok:#2e6b2e}@media(prefers-color-scheme:dark){:root{--bg:#111318;--surface:#1d2024;--surface2:#272a2f;--on:#e2e2e9;--muted:#c4c6d0;--outline:#44474e;--primary:#b4c5ff;--on-primary:#1a2d60;--tonal:#32457a;--on-tonal:#dbe1ff;--error:#ffb4ab;--ok:#a3d39b}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--on);font:16px/1.5 Roboto,\"Google Sans\",system-ui,-apple-system,sans-serif;-webkit-tap-highlight-color:transparent}main{max-width:520px;margin:0 auto;padding:28px 16px 40px}.brand{display:flex;align-items:center;gap:12px;margin-bottom:20px}.logo{width:44px;height:44px;border-radius:14px;background:var(--tonal);display:grid;place-items:center}.logo svg{width:24px;height:24px;fill:var(--on-tonal)}.brand b{font-size:15px;letter-spacing:.2px;color:var(--muted);font-weight:500}h1{font-size:28px;line-height:36px;font-weight:600;margin:0 0 8px}.lead{color:var(--muted);margin:0 0 24px}.card{background:var(--surface);border-radius:28px;padding:20px;margin-bottom:12px;box-shadow:0 1px 2px rgba(0,0,0,.08)}@media(prefers-color-scheme:dark){.card{box-shadow:none;background:var(--surface)}}.card h2{font-size:18px;font-weight:600;margin:0 0 4px}.card p{color:var(--muted);margin:0 0 16px;font-size:14px}.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:56px;border:0;border-radius:999px;font:600 16px/1 inherit;font-family:inherit;text-decoration:none;cursor:pointer;transition:transform .12s,filter .12s}.btn:active{transform:scale(.98);filter:brightness(.92)}.filled{background:var(--primary);color:var(--on-primary)}.tonal{background:var(--tonal);color:var(--on-tonal)}textarea{width:100%;min-height:140px;resize:vertical;border:1px solid var(--outline);border-radius:16px;background:transparent;color:var(--on);padding:14px 16px;font:14px/1.45 ui-monospace,\"Roboto Mono\",monospace;margin-bottom:12px;outline:none}textarea:focus{border:2px solid var(--primary);padding:13px 15px}.note{display:flex;gap:10px;align-items:flex-start;color:var(--muted);font-size:13px;margin-top:20px;padding:0 4px}.note svg{flex:none;width:18px;height:18px;fill:var(--muted);margin-top:2px}.state{text-align:center;padding:32px 20px}.state .icon{width:72px;height:72px;border-radius:24px;margin:0 auto 16px;display:grid;place-items:center;background:var(--tonal)}.state .icon svg{width:36px;height:36px;fill:var(--on-tonal)}.state.err .icon{background:color-mix(in srgb,var(--error) 18%,transparent)}.state.err .icon svg{fill:var(--error)}[hidden]{display:none!important}</style></head><body><main><div class=\"brand\"><div class=\"logo\"><svg viewBox=\"0 0 24 24\"><path d=\"M12 2 4 5v6c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5V5l-8-3zm0 2.2 6 2.25V11c0 4.15-2.55 8.1-6 9.4V4.2z\"/></svg></div><b>Veil</b></div><section class=\"card state {{cls}}\"><div class=\"icon\">{{icon}}</div><h1>{{title}}</h1><p class=\"lead\" style=\"margin:0\">{{msg}}</p></section></main></body></html>"
 
-        const val RESULT = "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">" +
-            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Veil</title>" +
-            "<style>$STYLE</style></head><body><h1>Veil</h1><p>{{msg}}</p></body></html>"
+        const val CHECK_ICON = "<svg viewBox=\"0 0 24 24\"><path d=\"M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z\"/></svg>"
+        const val ERROR_ICON = "<svg viewBox=\"0 0 24 24\"><path d=\"M11 15h2v2h-2zm0-8h2v6h-2zm1-5a10 10 0 1 0 0 20 10 10 0 0 0 0-20z\"/></svg>"
+
+        fun result(ok: Boolean, title: String, msg: String): String = RESULT
+            .replace("{{cls}}", if (ok) "" else "err")
+            .replace("{{icon}}", if (ok) CHECK_ICON else ERROR_ICON)
+            .replace("{{title}}", title)
+            .replace("{{msg}}", msg)
     }
 }

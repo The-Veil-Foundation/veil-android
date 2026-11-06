@@ -14,7 +14,6 @@ import dev.local.veil.core.CommunityCatalog
 import dev.local.veil.core.CommunityList
 import dev.local.veil.core.DnsSettings
 import dev.local.veil.core.GroupKind
-import dev.local.veil.core.GroupQuery
 import dev.local.veil.core.AddInput
 import dev.local.veil.core.newId
 import dev.local.veil.core.NodeAnnotation
@@ -164,14 +163,13 @@ class VeilState(
             return servers.firstOrNull { it.id == selectedId } ?: servers.firstOrNull()
         }
 
-    /** Узлы без пометки «скрыт» — их показывают списки. */
+    /**
+     * Узлы без пометки «скрыт» — их показывают списки. Скрытие источника
+     * целиком ушло вместе со старым экраном «Источники» (на macOS его нет),
+     * поэтому старый флаг [Subscription.hidden] больше ничего не прячет.
+     */
     val visibleServers: List<ProxyConfig>
-        get() {
-            val hiddenSources = subscriptions.filter { it.hidden }.mapTo(HashSet()) { it.url }
-            return servers.filter {
-                settings.annotations[it.id]?.hidden != true && it.source !in hiddenSources
-            }
-        }
+        get() = servers.filter { settings.annotations[it.id]?.hidden != true }
 
     /** Источники в порядке показа: закреплённые сверху, дальше как расставлены. */
     val orderedSubscriptions: List<Subscription>
@@ -263,6 +261,7 @@ class VeilState(
         settings = next
         container.settings.save(next)
         container.subscriptions.userAgent = next.userAgent
+        ensureGeo()
     }
 
     /* ---------------- маршрутизация, группы, заметки ---------------- */
@@ -461,17 +460,31 @@ class VeilState(
         saveAnnotation(serverId, annotationFor(serverId).copy(hidden = hidden))
     }
 
+    /**
+     * Тихо скачивает geo-базу, если настройкам она нужна, а её нет. Кнопки
+     * «Скачать базу» больше нет, поэтому сообщаем только об ошибке.
+     */
+    fun ensureGeo() {
+        if (settings.needsGeoAssets && !geoAvailable && !geoBusy && !geoAutoFailed) downloadGeo()
+    }
+
+    /**
+     * Неудачная автозагрузка не повторяется до следующего запуска: иначе
+     * каждое сохранение настроек показывало бы ту же ошибку.
+     */
+    private var geoAutoFailed = false
+
     /** Скачивает базу правил выбранного источника. */
-    fun downloadGeo() {
+    private fun downloadGeo() {
         if (geoBusy) return
         geoBusy = true
         scope.launch {
             container.geo.download(settings.geoSource, settings.customGeoipUrl, settings.customGeositeUrl)
                 .onSuccess {
                     geoAvailable = true
-                    showBulletin(tr("База правил загружена", "Rule database downloaded"), BulletinKind.SUCCESS)
                 }
                 .onFailure { error ->
+                    geoAutoFailed = true
                     showBulletin(error.message ?: tr("Не удалось скачать базу правил", "Could not download the rule database"), BulletinKind.ERROR)
                 }
             geoBusy = false
@@ -713,34 +726,53 @@ class VeilState(
         container.store.saveSubscriptions(subscriptions)
     }
 
-    /**
-     * Группа «самый быстрый» поверх источника: следует за ним, включая узлы,
-     * которые он получит позже, как на macOS.
-     */
-    fun makeSourceGroup(subscription: Subscription) {
-        val existing = settings.groups.firstOrNull {
-            it.kind == GroupKind.URLTEST && it.query?.sourceIds == listOf(subscription.url)
-        }
-        if (existing != null) {
-            showBulletin(tr("Группа «${existing.name}» уже есть", "Group “${existing.name}” already exists"))
-            return
-        }
-        upsertGroup(
-            ServerGroup(
-                name = subscription.displayName,
-                kind = GroupKind.URLTEST,
-                query = GroupQuery(sourceIds = listOf(subscription.url)),
-            ),
-        )
-        showBulletin(tr("Группа создана — она в списке серверов", "Group created — find it in the server list"), BulletinKind.SUCCESS)
-    }
-
     /** Копия узла в «Вручную», где его можно менять, не трогая подписку. */
     fun duplicateToManual(server: ProxyConfig) {
         val copy = server.copy(id = newId(), source = null, name = server.name + tr(" (копия)", " (copy)"))
         servers = servers + copy
         container.store.save(servers)
         showBulletin(tr("Копия добавлена во «Вручную»", "Copy added to Manual"), BulletinKind.SUCCESS)
+    }
+
+    /** Итог проверки узла ядром, как ConfigValidator.Outcome на macOS. */
+    sealed interface NodeCheck {
+        data object Ok : NodeCheck
+        /** Ядро отказалось — его собственными словами. */
+        data class Failed(val message: String) : NodeCheck
+        /** Ядра нет на устройстве: проверить нечем. */
+        data object Unavailable : NodeCheck
+    }
+
+    /** Прогоняет узел через ядро, которое его запустит, не поднимая туннель. */
+    suspend fun checkNode(node: ProxyConfig): NodeCheck {
+        dev.local.veil.core.NodeRepresentation.missingCredential(node)?.let { (ru, en) ->
+            return NodeCheck.Failed(tr(ru, en))
+        }
+        val engine = settings.coreEngine.resolve(node)
+        val result = withContext(Dispatchers.Default) {
+            runCatching {
+                val json = if (engine == dev.local.veil.core.CoreEngine.SING_BOX) {
+                    dev.local.veil.core.SingboxConfig.build(node, TunnelOptions()).toString()
+                } else {
+                    dev.local.veil.core.XrayConfig.json(node, TunnelOptions())
+                }
+                container.checkConfig(engine, json)
+            }.getOrElse { return@withContext Result.failure<Unit>(it) }
+        } ?: return NodeCheck.Unavailable
+        return result.fold(
+            onSuccess = { NodeCheck.Ok },
+            onFailure = { NodeCheck.Failed(it.message ?: it.toString()) },
+        )
+    }
+
+    /**
+     * Пишет изменённый узел поверх узла с тем же id. Id сохраняет
+     * [dev.local.veil.core.NodeRepresentation.parse], поэтому группы, правила
+     * и пометки, которые его называют, его находят.
+     */
+    fun replaceServer(node: ProxyConfig) {
+        servers = servers.map { if (it.id == node.id) node else it }
+        container.store.save(servers)
     }
 
     /* ---------------- перенос между устройствами ---------------- */
@@ -756,6 +788,20 @@ class VeilState(
         pendingPairing = null
     }
 
+    /** Ход переноса подписок: окно поверх всего, чтобы его не закрыли на полпути. */
+    sealed interface TransferProgress {
+        data class Sending(val subscriptions: Int, val servers: Int) : TransferProgress
+        data class Receiving(val done: Int, val total: Int) : TransferProgress
+        data class Finished(val ok: Boolean, val title: String, val message: String) : TransferProgress
+    }
+
+    var transferProgress by mutableStateOf<TransferProgress?>(null)
+        private set
+
+    fun closeTransferProgress() {
+        if (transferProgress is TransferProgress.Finished) transferProgress = null
+    }
+
     /** Открывает приём на этом устройстве; вызывающий обязан закрыть сессию. */
     fun startReceiving(): ReceiveSession? = container.transfer.startReceiving { receiveTransfer(it) }
 
@@ -765,9 +811,13 @@ class VeilState(
             busy = true
             bulletin = null
             val before = servers.size
-            payload.subscriptions
-                .filter { it.startsWith("http://") || it.startsWith("https://") }
-                .forEach { fetchAndAdd(it) }
+            val urls = payload.subscriptions.filter { it.startsWith("http://") || it.startsWith("https://") }
+            transferProgress = TransferProgress.Receiving(done = 0, total = urls.size)
+            var failed = 0
+            urls.forEachIndexed { index, url ->
+                if (fetchAndAdd(url) != null) failed++
+                transferProgress = TransferProgress.Receiving(done = index + 1, total = urls.size)
+            }
             if (payload.servers.isNotEmpty()) {
                 applyBody(
                     SubscriptionPayload.classify(payload.servers.joinToString("\n")),
@@ -776,20 +826,27 @@ class VeilState(
                 )
             }
             busy = false
-            showBulletin(
-                tr("Получено: подписок ${payload.subscriptions.size}, новых серверов ${servers.size - before}", "Received: ${payload.subscriptions.size} subscriptions, ${servers.size - before} new servers"),
-                BulletinKind.SUCCESS,
+            val added = servers.size - before
+            transferProgress = TransferProgress.Finished(
+                ok = failed < urls.size || added > 0,
+                title = tr("Подписки получены", "Subscriptions received"),
+                message = tr("Подписок: ${urls.size - failed}, новых серверов: $added.", "Subscriptions: ${urls.size - failed}, new servers: $added.") +
+                    if (failed > 0) tr(" Не загрузилось: $failed — обновите их позже.", " Failed to load: $failed — refresh them later.") else "",
             )
         }
     }
 
-    /** Отправляет всё, что есть на этом устройстве, на приставку из QR. */
-    fun confirmTransfer() {
+
+    /**
+     * Отправляет на приставку из QR то, что человек отметил: выбранные
+     * подписки и, если отмечено, серверы, добавленные вручную.
+     */
+    fun confirmTransfer(subscriptionUrls: Set<String>, manualServers: Boolean) {
         val address = pendingPairing ?: return
         pendingPairing = null
         val payload = TransferPayload(
-            subscriptions = subscriptions.map { it.url },
-            servers = servers.filter { it.source == null }.mapNotNull { ShareLink.encode(it) },
+            subscriptions = subscriptions.map { it.url }.filter { it in subscriptionUrls },
+            servers = if (manualServers) servers.filter { it.source == null }.mapNotNull { ShareLink.encode(it) } else emptyList(),
         )
         if (payload.isEmpty) {
             showBulletin(tr("Нечего отправлять: добавьте подписку или сервер", "Nothing to send: add a subscription or server"), BulletinKind.ERROR)
@@ -797,14 +854,25 @@ class VeilState(
         }
         scope.launch {
             busy = true
+            transferProgress = TransferProgress.Sending(payload.subscriptions.size, payload.servers.size)
             container.transfer.send(address, payload)
                 .onSuccess {
-                    showBulletin(
-                        tr("Отправлено: подписок ${payload.subscriptions.size}, серверов ${payload.servers.size}", "Sent: ${payload.subscriptions.size} subscriptions, ${payload.servers.size} servers"),
-                        BulletinKind.SUCCESS,
+                    transferProgress = TransferProgress.Finished(
+                        ok = true,
+                        title = tr("Отправлено", "Sent"),
+                        message = tr(
+                            "Подписок: ${payload.subscriptions.size}, серверов: ${payload.servers.size}. Приставка сейчас их загрузит — посмотрите на телевизор.",
+                            "Subscriptions: ${payload.subscriptions.size}, servers: ${payload.servers.size}. The TV box is loading them now — check the TV.",
+                        ),
                     )
                 }
-                .onFailure { showBulletin(it.message ?: tr("Не удалось отправить", "Could not send"), BulletinKind.ERROR) }
+                .onFailure {
+                    transferProgress = TransferProgress.Finished(
+                        ok = false,
+                        title = tr("Не удалось отправить", "Could not send"),
+                        message = it.message ?: tr("Проверьте, что телефон и приставка в одной сети Wi-Fi.", "Make sure the phone and the TV box are on the same Wi-Fi."),
+                    )
+                }
             busy = false
         }
     }

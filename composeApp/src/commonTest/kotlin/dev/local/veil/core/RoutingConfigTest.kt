@@ -91,6 +91,24 @@ class RoutingConfigTest {
     }
 
     @Test
+    fun singboxFragmentsTlsWhenEnabled() {
+        // Xray режет ClientHello через finalmask; sing-box должен делать то
+        // же, иначе на сетях с DPI Reality сбрасывается на рукопожатии.
+        val reality = node.copy(security = StreamSecurity.REALITY, sni = "example.com", publicKey = "pk")
+        fun proxyTls(fragment: Boolean): JsonObject {
+            val config = json(SingboxConfig.build(reality, TunnelOptions(fragment = fragment)).toString())
+            return config.outbounds().map { it.jsonObject }
+                .first { it["tag"]?.jsonPrimitive?.content == "proxy" }["tls"]!!.jsonObject
+        }
+        assertEquals("true", proxyTls(fragment = true)["fragment"]!!.jsonPrimitive.content)
+        assertTrue("fragment" !in proxyTls(fragment = false))
+        // Без TLS резать нечего: поле не появляется.
+        val plain = json(SingboxConfig.build(node, TunnelOptions(fragment = true)).toString())
+        val proxy = plain.outbounds().map { it.jsonObject }.first { it["tag"]?.jsonPrimitive?.content == "proxy" }
+        assertTrue(proxy["tls"]?.jsonObject?.get("fragment") == null)
+    }
+
+    @Test
     fun singboxRendersRuleAndDns() {
         val rule = RoutingRule(
             target = RuleTarget(TargetKind.BLOCK),

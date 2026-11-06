@@ -141,6 +141,13 @@ interface LogProvider {
     val path: String
     suspend fun read(): String
     fun clear()
+
+    /**
+     * Лог пробного ядра: пинги и проверки узлов. На Android для них часто
+     * работает sing-box, даже когда туннель держит Xray.
+     */
+    suspend fun readChecks(): String = ""
+    fun clearChecks() {}
 }
 
 /** Релиз с GitHub, который можно поставить поверх текущей версии. */
@@ -175,4 +182,10 @@ interface AppContainer {
 
     /** Перенос на другие устройства и «Поделиться»; по умолчанию недоступен. */
     val transfer: TransferService get() = NoTransferService
+
+    /**
+     * Проверяет конфиг ядром, которое его запустит, не запуская туннель.
+     * null — ядра нет (сборка без .aar): проверять нечем.
+     */
+    fun checkConfig(engine: dev.local.veil.core.CoreEngine, configJson: String): Result<Unit>? = null
 }

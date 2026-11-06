@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -49,6 +50,9 @@ fun SettingsScreen(
     onOpenLogs: () -> Unit = {},
     onOpenReceive: () -> Unit = {},
     modifier: Modifier = Modifier,
+    // Живёт выше экрана: подэкраны (раздельный туннель, логи) убирают его из
+    // композиции, и своя позиция прокрутки сбрасывалась бы наверх.
+    scroll: ScrollState = rememberScrollState(),
 ) {
     val settings = state.settings
     val clipboard = LocalClipboardManager.current
@@ -59,7 +63,7 @@ fun SettingsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -117,26 +121,6 @@ fun SettingsScreen(
                         icon = AppIcons.ShieldCheck,
                     )
                 },
-                {
-                    SegmentSwitch(
-                        // Ярлык к пресету «Bypass Russia» из «Маршрутизации».
-                        title = tr("Россия напрямую", "Bypass Russia"),
-                        subtitle = tr(
-                            "Пресет маршрутизации. Остальные — во вкладке «Маршрут».",
-                            "A routing preset. The others live in the Routing tab.",
-                        ),
-                        checked = settings.routingPreset == dev.local.veil.core.RoutingPreset.BYPASS_RU,
-                        onCheckedChange = { on ->
-                            val preset = if (on) {
-                                dev.local.veil.core.RoutingPreset.BYPASS_RU
-                            } else {
-                                dev.local.veil.core.RoutingPreset.BYPASS_LAN
-                            }
-                            state.saveRouting(preset, settings.customRules, settings.blockAds)
-                        },
-                        icon = AppIcons.Routing,
-                    )
-                },
             ),
         )
 
@@ -156,6 +140,18 @@ fun SettingsScreen(
                         subtitle = tr("Обновить, добавить, удалить", "Refresh, add, remove"),
                         onClick = onOpenSubscriptions,
                         icon = AppIcons.Layers,
+                    )
+                },
+                {
+                    SegmentSwitch(
+                        title = tr("Показывать вкладку «Источники»", "Show the Sources tab"),
+                        subtitle = tr(
+                            "Откуда взялись серверы и что вернул каждый источник. Без вкладки страница открывается рядом выше.",
+                            "Where the servers came from and what each source returned. Without the tab, the row above opens it.",
+                        ),
+                        checked = settings.showSourcesTab,
+                        onCheckedChange = { state.saveSettings(state.settings.copy(showSourcesTab = it)) },
+                        icon = AppIcons.Eye,
                     )
                 },
                 {

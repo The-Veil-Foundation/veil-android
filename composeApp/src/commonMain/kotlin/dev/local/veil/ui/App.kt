@@ -124,6 +124,18 @@ fun App(container: AppContainer) {
     // Навигация живёт выше обёрток темы и языка: их смена не должна
     // пересоздавать экран, на котором стоит пользователь.
     var tab by remember { mutableStateOf(Tab.SERVERS) }
+    // Прокрутка вкладок держится здесь: подэкраны и смена вкладки убирают
+    // экран из композиции, и без этого он возвращался в самое начало.
+    val settingsScroll = rememberScrollState()
+    val routingScroll = rememberScrollState()
+    // «Источники» по умолчанию спрятаны, как на macOS после настройки
+    // подписок. Вкладка всё равно открывается из настроек: там ряд «Подписки».
+    val tabs = if (state.settings.showSourcesTab) Tab.entries else Tab.entries - Tab.SUBS
+    // Ссылка снаружи (veil://pair со страницы приставки) — как вставленная руками.
+    val incoming by dev.local.veil.core.IncomingLinks.link.collectAsState()
+    LaunchedEffect(incoming) {
+        dev.local.veil.core.IncomingLinks.take()?.let { state.addInput(it) }
+    }
     var showSplit by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
     // Поиск серверов живёт в верхней панели; null — поле закрыто.
@@ -193,6 +205,10 @@ fun App(container: AppContainer) {
             }
         }
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+
+        LaunchedEffect(Unit) {
+            state.ensureGeo()
+        }
 
         if (!state.isTv) {
             LaunchedEffect(Unit) {
@@ -376,7 +392,7 @@ fun App(container: AppContainer) {
                     enter = slideInVertically(tween(180)) { it } + fadeIn(),
                     exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(150)),
                 ) {
-                    VeilNavigationBar(current = tab, onSelect = { tab = it })
+                    VeilNavigationBar(current = tab, tabs = tabs, onSelect = { tab = it })
                 }
                 }
             },
@@ -459,7 +475,7 @@ fun App(container: AppContainer) {
                             onAdd = { showAdd = true },
                             onOpenReceive = { showReceive = true },
                         )
-                        Tab.ROUTING -> RoutingScreen(state = state, modifier = modifier)
+                        Tab.ROUTING -> RoutingScreen(state = state, modifier = modifier, homeScroll = routingScroll)
                         Tab.SETTINGS -> SettingsScreen(
                             state = state,
                             status = status,
@@ -468,6 +484,7 @@ fun App(container: AppContainer) {
                             onOpenLogs = { showLogs = true },
                             onOpenReceive = { showReceive = true },
                             modifier = modifier,
+                            scroll = settingsScroll,
                         )
                     }
                 }
@@ -478,6 +495,7 @@ fun App(container: AppContainer) {
             if (state.isTv || landscape) {
                 TvNavigationRail(
                     current = tab,
+                    tabs = tabs,
                     onSelect = { tab = it },
                     modifier = Modifier
                         .align(Alignment.CenterStart)
@@ -498,23 +516,12 @@ fun App(container: AppContainer) {
             )
         }
 
-        // QR приставки в локальной сети: спрашиваем, прежде чем отправлять ключи.
+        // QR приставки или «Открыть в Veil» на её странице: спрашиваем, что
+        // отправить, прежде чем ключи уйдут в сеть.
         if (state.pendingPairing != null) {
-            AlertDialog(
-                onDismissRequest = state::dismissTransfer,
-                shape = RoundedCornerShape(32.dp),
-                icon = { AppIcon(AppIcons.Qr) },
-                title = { Text(tr("Отправить на приставку?", "Send to the TV box?"), fontWeight = FontWeight.Black) },
-                text = {
-                    Text(
-                        tr("Подписок: ${state.subscriptions.size}, серверов вручную: ${state.servers.count { it.source == null }}. ", "Subscriptions: ${state.subscriptions.size}, manual servers: ${state.servers.count { it.source == null }}. ") +
-                            tr("Они уйдут на устройство в вашей локальной сети.", "They will be sent to a device on your local network."),
-                    )
-                },
-                confirmButton = { TextButton(onClick = state::confirmTransfer) { Text(tr("Отправить", "Send")) } },
-                dismissButton = { TextButton(onClick = state::dismissTransfer) { Text(tr("Отмена", "Cancel")) } },
-            )
+            TransferPicker(state)
         }
+        TransferProgressDialog(state)
 
         if (showQr) {
             QrScannerDialog(
@@ -568,7 +575,7 @@ fun App(container: AppContainer) {
 
 /** Нижняя навигация: Solar-иконки, выбранная чуть крупнее — без подпрыгивания. */
 @Composable
-private fun VeilNavigationBar(current: Tab, onSelect: (Tab) -> Unit) {
+private fun VeilNavigationBar(current: Tab, tabs: List<Tab>, onSelect: (Tab) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val pill = RoundedCornerShape(30.dp)
     // M3 Expressive: плавающая тональная панель вместо приклеенной к краю.
@@ -588,8 +595,9 @@ private fun VeilNavigationBar(current: Tab, onSelect: (Tab) -> Unit) {
                 .shadow(10.dp, pill, clip = false)
                 .clip(pill),
         ) {
-            Tab.entries.forEach { entry ->
-                val selected = current == entry
+            val shown = if (current in tabs) current else Tab.SETTINGS
+            tabs.forEach { entry ->
+                val selected = shown == entry
                 NavigationBarItem(
                     selected = selected,
                     onClick = { onSelect(entry) },
@@ -645,16 +653,20 @@ private fun TabIcon(entry: Tab, selected: Boolean) {
 @Composable
 private fun TvNavigationRail(
     current: Tab,
+    tabs: List<Tab>,
     onSelect: (Tab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val requesters = remember { Tab.entries.associateWith { FocusRequester() } }
+    // Скрытые «Источники» открываются из настроек: на рельсе их нет, поэтому
+    // подсвечен и держит фокус пункт «Настройки», а не случайный первый.
+    val shown = if (current in tabs) current else Tab.SETTINGS
     // На телевизоре первый кадр не сразу принимает фокус: пробуем несколько раз,
     // иначе пульт «застревает» на поле поиска или вообще ни на чём.
-    LaunchedEffect(current) {
+    LaunchedEffect(shown) {
         repeat(12) {
             delay(180)
-            val ok = runCatching { requesters.getValue(current).requestFocus() }.isSuccess
+            val ok = runCatching { requesters.getValue(shown).requestFocus() }.isSuccess
             if (ok) return@LaunchedEffect
         }
     }
@@ -671,11 +683,11 @@ private fun TvNavigationRail(
             verticalArrangement = Arrangement.SpaceEvenly,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Tab.entries.forEach { entry ->
+            tabs.forEach { entry ->
                 NavigationRailItem(
-                    selected = current == entry,
+                    selected = shown == entry,
                     onClick = { onSelect(entry) },
-                    icon = { TabIcon(entry = entry, selected = current == entry) },
+                    icon = { TabIcon(entry = entry, selected = shown == entry) },
                     label = {
                         Text(
                             text = when (entry) {
@@ -689,7 +701,9 @@ private fun TvNavigationRail(
                         )
                     },
                     alwaysShowLabel = true,
-                    modifier = Modifier.focusRequester(requesters.getValue(entry)),
+                    modifier = Modifier
+                        .tvFocusRing(RoundedCornerShape(20.dp))
+                        .focusRequester(requesters.getValue(entry)),
                 )
             }
         }
