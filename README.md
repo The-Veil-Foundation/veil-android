@@ -24,7 +24,7 @@
   <img src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white" alt="Android 7.0+">
   <img src="https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin Multiplatform">
   <img src="https://img.shields.io/badge/core-Xray-orange" alt="Core: Xray">
-  <img src="https://img.shields.io/badge/sing--box-in_progress-yellow" alt="sing-box: in progress">
+  <img src="https://img.shields.io/badge/sing--box-bundled-brightgreen" alt="sing-box: bundled">
 </p>
 
 <p align="center">
@@ -36,13 +36,14 @@
 
 Veil for Android is a Kotlin Multiplatform + Jetpack Compose port of
 [veil-ios](https://github.com/The-Veil-Foundation/veil-ios), built on
-[Xray-core](https://github.com/XTLS/Xray-core), with a [sing-box](https://github.com/SagerNet/sing-box)
-engine on the way. Material 3 Expressive UI, subscription profiles, one-tap connect, real node
-verification with automatic failover, phone-to-TV transfer, and a tunnel with no tun2socks and
-no extra hops in the data path.
+[Xray-core](https://github.com/XTLS/Xray-core) and
+[sing-box](https://github.com/SagerNet/sing-box). The engine is picked automatically per
+protocol — no manual core switch. Material 3 Expressive UI, subscription profiles, one-tap
+connect, real node verification with automatic failover, phone-to-TV transfer, and a tunnel
+with no tun2socks and no extra hops in the data path.
 
 > **Status: alpha (`0.1.0-alpha`).** Tested on a physical Samsung Galaxy S20 FE with live
-> VLESS/REALITY subscriptions. Expect rough edges.
+> VLESS/REALITY subscriptions. Both engines are bundled. Expect rough edges.
 
 > **Disclaimer.** Veil is a client for proxy protocols intended for privacy, development,
 > and lawful circumvention of censorship. You are responsible for complying with the laws
@@ -55,9 +56,8 @@ Grab an APK from the [latest release](https://github.com/The-Veil-Foundation/vei
 
 | File | For |
 | --- | --- |
-| `veil-<version>-arm64-v8a.apk` | phones and most Android TV boxes |
+| `veil-<version>-arm64-v8a.apk` | phones and most Android TV boxes — the one you need |
 | `veil-<version>-x86_64.apk` | emulators and x86 devices |
-| `veil-<version>-universal.apk` | both ABIs in one file — pick this if unsure |
 
 Allow installing from unknown sources when Android asks. Requires Android 7.0 (API 24) or
 later; 32-bit devices are not supported. The app checks GitHub Releases for updates
@@ -69,12 +69,13 @@ itself (*Settings → Check for updates*).
 
 | Engine | Protocols | Transports & security | Status |
 | --- | --- | --- | --- |
-| **Xray-core** | VLESS, VMess, Trojan, Shadowsocks, WireGuard | REALITY, TLS, XTLS Vision, XHTTP, uTLS fingerprints | ✅ default |
-| **sing-box** | Hysteria2, TUIC, AnyTLS and the rest | QUIC-based and modern transports | ⏳ in progress |
+| **Xray-core** | VLESS, VMess, Trojan, Shadowsocks, WireGuard | REALITY, TLS, XTLS Vision, XHTTP, uTLS fingerprints | ✅ automatic |
+| **sing-box** | Hysteria2, TUIC, AnyTLS | QUIC-based and modern transports | ✅ automatic |
 
-The engine is picked in *Settings → Core*. The sing-box config builder is in place, but the
-sing-box runtime is not bundled yet, so connections still go through Xray. Until it lands,
-Hysteria2, TUIC and AnyTLS links are imported but marked unusable.
+There is no core switcher: the engine follows the selected node's protocol. REALITY nodes stay
+on Xray — sing-box 1.12 cannot complete REALITY authentication with newer Xray servers yet.
+Hysteria2, TUIC and AnyTLS run on the bundled sing-box libbox; they have not been verified
+against live servers yet (the test subscription contained none).
 
 ### Subscriptions
 
@@ -117,16 +118,21 @@ Hysteria2, TUIC and AnyTLS links are imported but marked unusable.
 
 - **Split tunneling** — everything through VPN, everything *except* selected apps, or *only*
   selected apps, with search.
+- **Pause** — closes the tunnel so traffic goes directly, while the app, notification and
+  session stay alive; resume recreates the TUN and reconnects.
 - **IPv6** in the tunnel or around it, adjustable **MTU**.
 - **RU bypass** — `.ru` / `.su` / `.рф` go direct.
 - **DPI fragmentation** — TLS ClientHello fragmentation via Xray `finalmask`.
 
 ### Everything else
 
-- **Material 3 Expressive** — shape morphing, spring motion, segmented settings in bottom sheets.
+- **Material 3 Expressive** — spring motion, emphasized typography, pill chips and a floating
+  navigation bar in portrait that becomes a side rail in landscape and on TV. Content is kept
+  clear of display cutouts.
 - **Live UI** — download/upload speed, session time, pulsing connection state, floating toasts.
 - **Notification** — VPN state and quick actions in the shade.
-- **QR scanner** — camera2 + ZXing, no Google Play Services required.
+- **QR scanner** — camera2 + ZXing, no Google Play Services required; autofocus, torch and
+  high-resolution analysis for small codes.
 - **Android TV** — launcher entry, banner, full D-pad navigation and a *Receive from another
   device* screen.
 - **Pitch Black** — true-black theme for OLED screens.
@@ -139,18 +145,19 @@ Hysteria2, TUIC and AnyTLS links are imported but marked unusable.
 apps ──► Android routing ──► TUN (VpnService.establish())
                                 │ fd
                                 ▼
-                    Xray `tun` inbound (gVisor)
+                Xray `tun` inbound (gVisor) ── or ── sing-box `tun` (libbox)
                                 │ rules, sniffing, DNS
                                 ▼
-                    VLESS / VMess / Trojan / SS / WireGuard
+   VLESS / VMess / Trojan / SS / WireGuard / Hysteria2 / TUIC / AnyTLS
                                 │
                                 ▼
                               server
 ```
 
-`VpnService.establish()` returns a `ParcelFileDescriptor`. `XrayBridge` publishes its
-number through `xray.tun.fd`, and `proxy/tun/tun_android.go` inside Xray-core attaches to it
-directly — no tun2socks, no second core, no local SOCKS hop.
+`VpnService.establish()` returns a `ParcelFileDescriptor`. Xray publishes its number through
+`xray.tun.fd`, and `proxy/tun/tun_android.go` inside Xray-core attaches to it directly. The
+sing-box bridge does the same for libbox. Either way there is no tun2socks, no second core and
+no local SOCKS hop.
 
 <details>
 <summary>Details</summary>
@@ -161,32 +168,35 @@ directly — no tun2socks, no second core, no local SOCKS hop.
 - On a server switch the service recreates the TUN and hands the core a **duplicated**
   descriptor: gVisor closes the fd when the core stops, so reusing it would leave a
   "connected" tunnel that silently refuses every connection.
+- Pause closes the TUN and stops the core, so traffic goes out directly while the foreground
+  service keeps running; resume creates a fresh interface and starts the core again.
 
 </details>
 
 ## Build from source
 
-Requires JDK 21, Android SDK 36, NDK 29, and Go 1.26 (only for the core).
+Requires JDK 21 and Android SDK 36. NDK 29 and Go 1.26+ are only needed to rebuild the cores.
 
 ```bash
 git clone https://github.com/The-Veil-Foundation/veil-android.git && cd veil-android
 
-Scripts/build-xray-android.sh          # core, once (~10–20 min) → composeApp/libs/xray.aar
 ./gradlew :composeApp:assembleDebug    # APK
 ```
 
-> Without `xray.aar` the project still compiles and runs, but connecting reports
-> "xray.aar is not bundled".
+The repository ships a prebuilt combined gomobile AAR, `composeApp/libs/veil-core.aar`
+(Xray-core and sing-box libbox merged under one `go.Seq`), so a clean clone builds without Go.
+`Scripts/build-xray-android.sh` rebuilds the Xray part; the libbox part is built with gomobile
+and merged into the same AAR (no script for that is in the repo yet).
 
 ```bash
-./gradlew :composeApp:desktopTest      # 40 tests: links, share links, configs, Mihomo YAML
+./gradlew :composeApp:desktopTest      # 49 tests: links, share links, configs, Mihomo YAML
 ```
 
 <details>
 <summary>Releases and signing</summary>
 
 Releases are built **manually**: *Actions → Release → Run workflow*, with a tag such as
-`v0.1.1` that must match `versionName`. Nothing runs on push or tags. A build-only check
+`v0.1.1` that must match the `VERSION` file (the single source of the app version). Nothing runs on push or tags. A build-only check
 runs the same way via *Actions → CI*.
 
 ABI splits are enabled with `-PabiSplits`, so a plain `assembleDebug` still builds one APK.
@@ -203,7 +213,7 @@ Step-by-step guide: [`docs/release.md`](docs/release.md) (Russian).
 <summary>Logs</summary>
 
 In the app: *Settings → Core logs*. Files live in
-`Android/data/dev.local.veil/files/xray.log` and `xray.config.json` and can be pulled with
+`Android/data/org.veil.app/files/xray.log` and `xray.config.json` and can be pulled with
 `adb` (`run-as` fails on Samsung due to SELinux). The log is truncated on every new connection.
 
 </details>
@@ -216,11 +226,11 @@ In the app: *Settings → Core logs*. Files live in
 | Link parsing | `Core/LinkParser.swift` | ✅ ported, tested |
 | Subscriptions | `Core/SubscriptionPayload.swift` | ✅ links, base64, Xray arrays, `X-Hwid` |
 | Xray config builder | `Core/XrayConfigBuilder.swift` | ✅ ported, tested |
+| sing-box engine | — | ✅ runtime bundled: Hysteria2, TUIC, AnyTLS; REALITY stays on Xray |
 | TUN + core | `Tunnel/PacketTunnelProvider.swift` | ✅ on `VpnService` |
 | Go bridge | `XrayBridge/xray.go` | ✅ reused + probe instance |
 | UI | `App/Views/*` | ✅ servers, subscriptions, settings, split tunnel, logs, transfer |
 | Share links | — | ✅ `ShareLink`, inverse of the parser |
-| sing-box engine | — | ⏳ setting and config builder done, runtime not bundled |
 | `urltest` groups, Mihomo selectors | — | ⏳ not yet |
 | Routing rules editor, DNS editor | — | ⏳ not yet |
 | Config inspector, secret redaction | — | ⏳ not yet |
@@ -231,16 +241,19 @@ More in [`docs/porting.md`](docs/porting.md).
 ## Project layout
 
 ```
-composeApp/src/
-├── commonMain/kotlin/dev/local/veil/
-│   ├── core/      ProxyConfig, LinkParser, XrayConfig, AppSettings
-│   ├── platform/  AppContainer, VpnController, LogProvider, UpdateService
-│   └── ui/        App, screens, components, theme
-├── androidMain/kotlin/dev/local/veil/
-│   ├── MainActivity.kt
-│   └── platform/  VeilVpnService, XrayBridge, EndpointResolver, AndroidUpdateService
-├── desktopMain/   desktop stubs (no core)
-└── commonTest/    parser and config builder tests
+composeApp/
+├── libs/veil-core.aar   prebuilt Xray + sing-box cores (one gomobile AAR)
+└── src/
+    ├── commonMain/kotlin/dev/local/veil/
+    │   ├── core/      ProxyConfig, LinkParser, XrayConfig, SingboxConfig, AppSettings
+    │   ├── platform/  AppContainer, VpnController, LogProvider, UpdateService, Device
+    │   └── ui/        App, screens, components, theme, motion
+    ├── androidMain/kotlin/
+    │   ├── dev/local/veil/MainActivity.kt
+    │   ├── dev/local/veil/platform/  VeilVpnService, XrayBridge, EndpointResolver, AndroidUpdateService
+    │   └── singbox/   Singbox (libbox bridge)
+    ├── desktopMain/   desktop stubs (no core)
+    └── commonTest/    parser and config builder tests
 XrayBridge/        Go bridge (gomobile), probe instance support
 Scripts/           core build script
 docs/              porting notes, release guide
@@ -254,7 +267,7 @@ docs/              porting notes, release guide
 ## Acknowledgements
 
 - [XTLS/Xray-core](https://github.com/XTLS/Xray-core) — proxy engine
-- [SagerNet/sing-box](https://github.com/SagerNet/sing-box) — second engine (in progress)
+- [SagerNet/sing-box](https://github.com/SagerNet/sing-box) — second engine
 - [ZXing](https://github.com/zxing/zxing) — QR decoding
 - [JetBrains Compose Multiplatform](https://github.com/JetBrains/compose-multiplatform) — UI
 

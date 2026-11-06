@@ -1,38 +1,66 @@
 package dev.local.veil.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.local.veil.core.LogFilter
+import dev.local.veil.core.LogLine
+import dev.local.veil.core.LogSeverity
 import dev.local.veil.platform.LogProvider
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Просмотр лога ядра: обновить, скопировать, очистить. */
+/** Чей лог на экране: рабочего туннеля или пробного ядра (пинги и проверки). */
+private enum class LogSource { TUNNEL, CHECKS }
+
+/**
+ * Лог ядра, как панель логов на macOS: фильтр по тексту и по уровню,
+ * счётчик «видно / всего», копируется то, что видно. Пока экран открыт, лог
+ * подтягивается сам и идёт за концом, только если читатель и так внизу.
+ */
 @Composable
 fun LogsScreen(
     provider: LogProvider,
@@ -40,116 +68,191 @@ fun LogsScreen(
     onBack: () -> Unit = {},
     onBulletin: (String) -> Unit = {},
 ) {
-    var lines by remember { mutableStateOf<List<String>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    var source by remember { mutableStateOf(LogSource.TUNNEL) }
+    var raw by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    var minimum by remember { mutableStateOf<LogSeverity?>(null) }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
-    val seen = remember { mutableSetOf<Any>() }
 
-    suspend fun reload() {
-        loading = true
-        lines = provider.read().lines()
-        loading = false
+    suspend fun read(from: LogSource): String =
+        if (from == LogSource.TUNNEL) provider.read() else provider.readChecks()
+
+    // Живой хвост: раз в секунду, пока экран на виду. Файл маленький
+    // (последние 2000 строк), а строки разбираются только при изменении.
+    LaunchedEffect(source) {
+        raw = null
+        while (true) {
+            val next = read(source)
+            if (next != raw) raw = next
+            delay(1000)
+        }
     }
 
-    LaunchedEffect(provider) { reload() }
+    val all = remember(raw) { LogFilter.parse(raw.orEmpty()) }
+    val shown = remember(all, query, minimum) { LogFilter.apply(all, query, minimum) }
+    val filtering = query.isNotBlank() || minimum != null
 
-    // Свежие записи внизу — туда и прокручиваем.
-    LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) listState.scrollToItem(lines.lastIndex)
+    // Идём за концом, только если читатель уже внизу: прокрутка назад к
+    // ошибке не должна сбиваться следующей строкой.
+    val atEnd by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            info.totalItemsCount == 0 || last >= info.totalItemsCount - 2
+        }
+    }
+    var followed by remember { mutableStateOf(0) }
+    LaunchedEffect(shown.size, source) {
+        if (shown.isNotEmpty() && (atEnd || followed == 0)) {
+            listState.scrollToItem(shown.lastIndex)
+            followed++
+        }
     }
 
-    Column(modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .staggerIn(seen, "bar", 0)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            TextButton(
-                onClick = {
-                    scope.launch {
-                        reload()
-                        onBulletin(tr("Лог обновлён", "Log refreshed"))
-                    }
-                },
-            ) {
-                AppIcon(AppIcons.Refresh, modifier = Modifier.size(18.dp))
-                Text(tr(" Обновить", " Refresh"))
-            }
-            TextButton(
-                onClick = {
-                    clipboard.setText(AnnotatedString(lines.joinToString("\n")))
-                    onBulletin(tr("Лог скопирован в буфер обмена", "Log copied to clipboard"))
-                },
-            ) {
-                AppIcon(AppIcons.Copy, modifier = Modifier.size(18.dp))
-                Text(tr(" Копировать", " Copy"))
-            }
-            TextButton(
-                onClick = {
-                    provider.clear()
-                    scope.launch {
-                        reload()
-                        onBulletin(tr("Лог очищен", "Log cleared"))
-                    }
-                },
-            ) {
-                AppIcon(AppIcons.Trash, modifier = Modifier.size(18.dp))
-                Text(tr(" Очистить", " Clear"))
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            LogSource.entries.forEachIndexed { index, entry ->
+                SegmentedButton(
+                    selected = source == entry,
+                    onClick = {
+                        source = entry
+                        followed = 0
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index, LogSource.entries.size),
+                    label = {
+                        Text(
+                            if (entry == LogSource.TUNNEL) tr("Туннель", "Tunnel") else tr("Проверки", "Checks"),
+                        )
+                    },
+                )
             }
         }
 
-        Text(
-            text = provider.path,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.staggerIn(seen, "path", 1).padding(horizontal = 16.dp, vertical = 4.dp),
-        )
+        SearchPill(query = query, onQueryChange = { query = it })
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                LevelChip(tr("Все", "All"), minimum == null) { minimum = null }
+                LevelChip("Info", minimum == LogSeverity.INFO) { minimum = LogSeverity.INFO }
+                LevelChip("Warning", minimum == LogSeverity.WARNING) { minimum = LogSeverity.WARNING }
+                LevelChip("Error", minimum == LogSeverity.ERROR) { minimum = LogSeverity.ERROR }
+            }
+            Text(
+                if (filtering) "${shown.size}/${all.size}" else "${all.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+            IconButton(
+                enabled = shown.isNotEmpty(),
+                onClick = {
+                    // Копируется то, что видно: под фильтром тысяча скрытых
+                    // строк — не то, о чём просили.
+                    clipboard.setText(AnnotatedString(shown.joinToString("\n") { it.text }))
+                    onBulletin(tr("Лог скопирован", "Log copied"))
+                },
+            ) { AppIcon(AppIcons.Copy, contentDescription = tr("Копировать", "Copy"), modifier = Modifier.size(20.dp)) }
+            IconButton(
+                enabled = all.isNotEmpty(),
+                onClick = {
+                    if (source == LogSource.TUNNEL) provider.clear() else provider.clearChecks()
+                    scope.launch { raw = read(source) }
+                    onBulletin(tr("Лог очищен", "Log cleared"))
+                },
+            ) { AppIcon(AppIcons.Trash, contentDescription = tr("Очистить", "Clear"), modifier = Modifier.size(20.dp)) }
+        }
 
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier
-                .staggerIn(seen, "log", 2)
-                .fillMaxSize()
-                .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(bottom = 12.dp),
         ) {
-            if (loading) {
-                Text(
-                    tr("Читаю лог…", "Reading log…"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(16.dp),
+            when {
+                raw == null -> Placeholder(tr("Читаю лог…", "Reading the log…"))
+                all.isEmpty() -> Placeholder(
+                    if (source == LogSource.TUNNEL) {
+                        tr("Логов пока нет. Они появятся, когда туннель подключится.", "No logs yet. They appear once the tunnel connects.")
+                    } else {
+                        tr("Логов пока нет. Их пишет ядро, которое меряет пинг и проверяет узлы.", "No logs yet. The core that pings and checks servers writes them.")
+                    },
                 )
-            } else {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                    items(lines) { line ->
-                        Text(
-                            text = line,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp,
-                            ),
-                            fontWeight = if (line.contains("[Error]") || line.contains("[Warning]")) {
-                                FontWeight.Bold
-                            } else {
-                                FontWeight.Normal
-                            },
-                            color = if (line.contains("[Error]")) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 2.dp),
-                        )
+                shown.isEmpty() -> Placeholder(tr("Под этот фильтр ничего не подходит.", "Nothing matches this filter."))
+                else -> SelectionContainer {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp),
+                    ) {
+                        items(shown, key = { it.index }) { line -> LogRow(line) }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LevelChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        shape = CircleShape,
+        label = { Text(label) },
+    )
+}
+
+@Composable
+private fun Placeholder(text: String) {
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** Строка лога: полоска уровня слева, моноширинный текст, ошибки — цветом. */
+@Composable
+private fun LogRow(line: LogLine) {
+    val scheme = MaterialTheme.colorScheme
+    val accent = when (line.severity) {
+        LogSeverity.ERROR, LogSeverity.FATAL -> scheme.error
+        LogSeverity.WARNING -> scheme.tertiary
+        else -> Color.Transparent
+    }
+    val color = when (line.severity) {
+        LogSeverity.ERROR, LogSeverity.FATAL -> scheme.error
+        LogSeverity.DEBUG -> scheme.onSurfaceVariant
+        else -> scheme.onSurface
+    }
+    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp)) {
+        Spacer(
+            Modifier
+                .padding(vertical = 3.dp)
+                .width(3.dp)
+                .height(14.dp)
+                .background(accent, CircleShape),
+        )
+        Text(
+            line.text,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            ),
+            fontWeight = if (line.severity == LogSeverity.ERROR || line.severity == LogSeverity.FATAL) FontWeight.SemiBold else FontWeight.Normal,
+            color = color,
+            modifier = Modifier.padding(start = 8.dp, top = 1.dp, bottom = 1.dp),
+        )
     }
 }

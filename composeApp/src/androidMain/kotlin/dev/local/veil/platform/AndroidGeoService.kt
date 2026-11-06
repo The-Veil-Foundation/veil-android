@@ -23,12 +23,21 @@ class AndroidGeoService(private val dir: File) : GeoService {
             File(dir, name).let { it.exists() && it.length() > 0 }
         }
 
-    override suspend fun download(source: GeoAssetSource): Result<Unit> =
+    override suspend fun download(
+        source: GeoAssetSource,
+        customGeoip: String,
+        customGeosite: String,
+    ): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
+                val geoip = source.geoipUrl(customGeoip)
+                val geosite = source.geositeUrl(customGeosite)
+                require(geoip.startsWith("https://") && geosite.startsWith("https://")) {
+                    "Укажите https-адреса geoip.dat и geosite.dat"
+                }
                 dir.mkdirs()
-                downloadTo(source.geoipUrl(), File(dir, "geoip.dat"))
-                downloadTo(source.geositeUrl(), File(dir, "geosite.dat"))
+                downloadTo(geoip, File(dir, "geoip.dat"))
+                downloadTo(geosite, File(dir, "geosite.dat"))
                 check(hasAssets) { "Файлы базы не скачались" }
             }
         }
@@ -41,7 +50,7 @@ class AndroidGeoService(private val dir: File) : GeoService {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 20_000
             connection.readTimeout = 60_000
-            connection.setRequestProperty("User-Agent", "Veil/0.1")
+            connection.setRequestProperty("User-Agent", dev.local.veil.AppVersion.USER_AGENT)
             val code = connection.responseCode
             if (code in 300..399) {
                 val location = connection.getHeaderField("Location")

@@ -251,10 +251,7 @@ internal fun SegmentInput(
         label = { Text(label) },
         singleLine = true,
         shape = RoundedCornerShape(16.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
+        colors = veilFieldColors(),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -362,3 +359,16 @@ fun ChipSmall(text: String, selected: Boolean, onClick: () -> Unit) {
         )
     }
 }
+
+/**
+ * Поле ввода без контрастной рамки, как в листе «Добавить»: тональная
+ * подложка, рамка появляется только в фокусе.
+ */
+@Composable
+internal fun veilFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+    disabledBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+)

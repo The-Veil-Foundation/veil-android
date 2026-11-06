@@ -28,9 +28,9 @@
 
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTask"
             android:enableOnBackInvokedCallback="true"
             android:exported="true"
-            android:screenOrientation="landscape"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:theme="@style/Theme.Veil">
@@ -39,6 +39,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <!-- Тот же экран в лончере Android TV -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <!-- Страница приёма на приставке: «Открыть в Veil» на телефоне -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="veil" android:host="pair" />
             </intent-filter>
         </activity>
 

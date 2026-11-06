@@ -53,6 +53,13 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
@@ -117,6 +124,13 @@ object AppIcons {
     val Bolt = Icons.Rounded.Bolt
     val Block = Icons.Rounded.Block
     val Search = Icons.Rounded.Search
+    val Paste = Icons.Rounded.ContentPaste
+    val Scan = Icons.Rounded.QrCodeScanner
+    val Transfer = Icons.Rounded.Devices
+    val Link = Icons.Rounded.Link
+    val Edit = Icons.Rounded.Edit
+    val AutoRefresh = Icons.Rounded.Autorenew
+    val Wifi = Icons.Rounded.Wifi
 }
 
 /** Иконка темы по умолчанию: размер и цвет берутся из `LocalContentColor`. */

@@ -79,13 +79,21 @@ object SingboxBridge {
     }
 
     fun uplinkTotal(): Long {
-        val c = clazz ?: return 0L
-        return runCatching { c.getMethod("uplinkTotal").invoke(null) as? Long ?: 0L }.getOrDefault(0L)
+        val method = uplinkMethod ?: return 0L
+        return runCatching { method.invoke(null) as? Long ?: 0L }.getOrDefault(0L)
     }
 
     fun downlinkTotal(): Long {
-        val c = clazz ?: return 0L
-        return runCatching { c.getMethod("downlinkTotal").invoke(null) as? Long ?: 0L }.getOrDefault(0L)
+        val method = downlinkMethod ?: return 0L
+        return runCatching { method.invoke(null) as? Long ?: 0L }.getOrDefault(0L)
+    }
+
+    private val uplinkMethod: java.lang.reflect.Method? by lazy {
+        clazz?.let { runCatching { it.getMethod("uplinkTotal") }.getOrNull() }
+    }
+
+    private val downlinkMethod: java.lang.reflect.Method? by lazy {
+        clazz?.let { runCatching { it.getMethod("downlinkTotal") }.getOrNull() }
     }
 
     private fun callString(name: String): String? =

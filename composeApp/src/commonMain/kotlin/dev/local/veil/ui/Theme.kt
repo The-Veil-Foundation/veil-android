@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import dev.local.veil.core.AppStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Material You: на Android 12+ палитра берётся из обоев пользователя,
@@ -110,11 +111,74 @@ fun OrbitTheme(
     val base = dynamicColorScheme(dark) ?: if (dark) FallbackDark else FallbackLight
     val scheme = if (pitchBlack) pitchBlackScheme(base) else base
 
+    // MaterialExpressiveTheme в Compose Multiplatform 1.9 ещё помечен internal
+    // (публичен только в androidx-сборке), поэтому берём MaterialTheme и
+    // добавляем экспрессивность сами: формы, типографика и Motion.kt.
     MaterialTheme(
-        colorScheme = scheme,
+        colorScheme = animatedColorScheme(scheme),
         typography = orbitTypography(),
         shapes = orbitShapes(),
         content = content,
+    )
+}
+
+/**
+ * Плавная смена темы: каждый цвет схемы перетекает к новому значению, а не
+ * переключается кадром. На слабых устройствах — мгновенно.
+ */
+@Composable
+private fun animatedColorScheme(target: ColorScheme): ColorScheme {
+    val spec: androidx.compose.animation.core.AnimationSpec<androidx.compose.ui.graphics.Color> =
+        if (dev.local.veil.platform.isLowRamDevice()) {
+            androidx.compose.animation.core.snap()
+        } else {
+            androidx.compose.animation.core.tween(
+                durationMillis = 200,
+                easing = androidx.compose.animation.core.LinearOutSlowInEasing,
+            )
+        }
+
+    @Composable
+    fun animate(color: androidx.compose.ui.graphics.Color) =
+        androidx.compose.animation.animateColorAsState(color, spec, label = "theme").value
+
+    return target.copy(
+        primary = animate(target.primary),
+        onPrimary = animate(target.onPrimary),
+        primaryContainer = animate(target.primaryContainer),
+        onPrimaryContainer = animate(target.onPrimaryContainer),
+        inversePrimary = animate(target.inversePrimary),
+        secondary = animate(target.secondary),
+        onSecondary = animate(target.onSecondary),
+        secondaryContainer = animate(target.secondaryContainer),
+        onSecondaryContainer = animate(target.onSecondaryContainer),
+        tertiary = animate(target.tertiary),
+        onTertiary = animate(target.onTertiary),
+        tertiaryContainer = animate(target.tertiaryContainer),
+        onTertiaryContainer = animate(target.onTertiaryContainer),
+        background = animate(target.background),
+        onBackground = animate(target.onBackground),
+        surface = animate(target.surface),
+        onSurface = animate(target.onSurface),
+        surfaceVariant = animate(target.surfaceVariant),
+        onSurfaceVariant = animate(target.onSurfaceVariant),
+        surfaceTint = animate(target.surfaceTint),
+        inverseSurface = animate(target.inverseSurface),
+        inverseOnSurface = animate(target.inverseOnSurface),
+        error = animate(target.error),
+        onError = animate(target.onError),
+        errorContainer = animate(target.errorContainer),
+        onErrorContainer = animate(target.onErrorContainer),
+        outline = animate(target.outline),
+        outlineVariant = animate(target.outlineVariant),
+        scrim = animate(target.scrim),
+        surfaceBright = animate(target.surfaceBright),
+        surfaceDim = animate(target.surfaceDim),
+        surfaceContainer = animate(target.surfaceContainer),
+        surfaceContainerHigh = animate(target.surfaceContainerHigh),
+        surfaceContainerHighest = animate(target.surfaceContainerHighest),
+        surfaceContainerLow = animate(target.surfaceContainerLow),
+        surfaceContainerLowest = animate(target.surfaceContainerLowest),
     )
 }
 
@@ -133,14 +197,18 @@ internal fun orbitShapes() = Shapes(
  */
 internal fun orbitTypography(): Typography {
     val base = Typography()
+    // M3 Expressive: акцентная (emphasized) шкала — те же размеры, но
+    // плотнее трекинг и тяжелее вес для заголовков и подписей.
     return base.copy(
-        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold),
-        headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold),
-        headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold),
-        titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold),
-        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-        labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-        labelMedium = base.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+        displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
+        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp),
+        headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp),
+        headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
+        titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.sp),
+        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
+        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
+        labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp),
+        labelMedium = base.labelMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp),
+        labelSmall = base.labelSmall.copy(fontWeight = FontWeight.Medium, letterSpacing = 0.4.sp),
     )
 }

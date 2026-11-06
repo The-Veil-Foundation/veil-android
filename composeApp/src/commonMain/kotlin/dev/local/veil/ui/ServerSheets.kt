@@ -38,6 +38,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -115,14 +118,27 @@ private fun ActionsSheet(
     var confirming by remember { mutableStateOf<SheetAction?>(null) }
     val seen = remember { mutableSetOf<Any>() }
     val controller = remember { SheetController(scope, sheetState, onDismiss) { page = it } }
+    // Высота листа меняется вместе со страницей; на низком экране (TV,
+    // ландшафт) лист оставался на старой отметке и обрезал низ страницы.
+    LaunchedEffect(page) {
+        if (page != SheetPage.ACTIONS && sheetState.isVisible) {
+            delay(220)
+            runCatching { sheetState.expand() }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
     ) {
+        // Лист прокручивается целиком: в горизонтальном положении пункты не
+        // помещаются по высоте, и последний — красное «Удалить» — пропадал.
         Column(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             SheetHeader(icon = icon, title = title, subtitle = subtitle)
@@ -180,7 +196,7 @@ private fun ActionsSheet(
                                                 containerColor = MaterialTheme.colorScheme.error,
                                                 contentColor = MaterialTheme.colorScheme.onError,
                                             ),
-                                            shape = RoundedCornerShape(18.dp),
+                                            shape = MaterialTheme.shapes.large,
                                         ) { Text(tr("Удалить", "Delete")) }
                                         TextButton(onClick = { confirming = null }) { Text(tr("Отмена", "Cancel")) }
                                     }
@@ -191,7 +207,7 @@ private fun ActionsSheet(
 
                     SheetPage.DETAILS -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         PageBar(title = tr("Подробности", "Details"), onBack = { page = SheetPage.ACTIONS }) {
-                            TextButton(onClick = { reveal = !reveal }) {
+                            TextButton(modifier = Modifier.tvFocusRing(CircleShape), onClick = { reveal = !reveal }) {
                                 AppIcon(
                                     if (reveal) AppIcons.EyeOff else AppIcons.Eye,
                                     modifier = Modifier.size(18.dp),
@@ -200,7 +216,13 @@ private fun ActionsSheet(
                                 Text(if (reveal) tr("Скрыть ключи", "Hide keys") else tr("Показать ключи", "Show keys"))
                             }
                         }
-                        Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                        val detailScroll = rememberScrollState()
+                        Column(
+                            Modifier
+                                .heightIn(max = if (LocalTvMode.current) 300.dp else 460.dp)
+                                .tvKeyScroll(detailScroll)
+                                .verticalScroll(detailScroll),
+                        ) {
                             details?.invoke(reveal)
                         }
                     }
@@ -261,7 +283,7 @@ private fun SheetHeader(icon: ImageVector, title: String, subtitle: String) {
 @Composable
 private fun PageBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onBack) {
+        IconButton(modifier = Modifier.tvFocusRing(CircleShape), onClick = onBack) {
             AppIcon(AppIcons.ArrowLeft, contentDescription = tr("Назад", "Back"))
         }
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -301,6 +323,7 @@ private fun ActionTile(
         contentColor = content,
         modifier = Modifier
             .fillMaxWidth()
+            .tvFocusRing(RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom))
             .staggerIn(seen, "tile-$index", index)
             .graphicsLayer { scaleX = scale; scaleY = scale },
     ) {
@@ -337,9 +360,14 @@ fun ServerActionsSheet(
 ) {
     val clipboard = LocalClipboardManager.current
     val link = remember(server) { state.linkFor(server) }
-    val selected = state.selected?.id == server.id
-    val annotation = state.annotationFor(server.id)
-    var editingNote by remember { mutableStateOf(false) }
+    var editingConfig by remember { mutableStateOf(false) }
+    // «Конфигурация» закрывает лист и открывает своё окно.
+    // Окно живёт в этом же composable, поэтому вызывающему сообщаем о закрытии
+    // только когда закрыто и оно: иначе он уберёт лист вместе с окном.
+    var sheetGone by remember { mutableStateOf(false) }
+    LaunchedEffect(sheetGone, editingConfig) {
+        if (sheetGone && !editingConfig) onDismiss()
+    }
     val ping = state.pings[server.id]
     val endpoint = if (server.balanced > 1) {
         tr("авто из ${server.balanced} транспортов", "auto from ${server.balanced} transports")
@@ -347,7 +375,7 @@ fun ServerActionsSheet(
         server.endpoint
     }
 
-    ActionsSheet(
+    if (!sheetGone) ActionsSheet(
         icon = AppIcons.Server,
         title = state.displayName(server),
         subtitle = buildString {
@@ -360,24 +388,31 @@ fun ServerActionsSheet(
         details = { reveal -> ServerDetails(server, reveal) },
         buildActions = { sheet ->
             buildList {
-                if (!selected) {
-                    add(SheetAction(AppIcons.Check, tr("Выбрать", "Select")) {
-                        sheet.close { state.select(server.id, status) }
-                    })
-                }
-                add(SheetAction(AppIcons.Stopwatch, tr("Проверить пинг", "Ping"), tr("Метод: ${state.pingMode.label}", "Method: ${pingModeTitle(state.pingMode)}")) {
-                    sheet.close { state.pingOne(server) }
-                })
                 add(SheetAction(AppIcons.Eye, tr("Посмотреть", "View"), tr("Параметры узла", "Server details")) {
                     sheet.navigate(SheetPage.DETAILS)
                 })
+                // Редактор узла с macOS: JSON, ссылка или конфиг WireGuard.
+                // Свой узел правится и проверяется ядром, узел подписки читается.
                 add(
                     SheetAction(
-                        icon = AppIcons.Note,
-                        title = tr("Изменить", "Edit"),
-                        subtitle = tr("Имя, заметка, теги, скрытие", "Name, note, tags, visibility"),
-                    ) { sheet.close { editingNote = true } },
+                        icon = AppIcons.Document,
+                        title = tr("Конфигурация", "Configuration"),
+                        subtitle = if (server.source == null) {
+                            tr("JSON или ссылка — изменить и проверить ядром", "JSON or link — edit and check with the core")
+                        } else {
+                            tr("JSON или ссылка, как её запустит ядро", "JSON or link, as the core will run it")
+                        },
+                    ) { sheet.close { editingConfig = true } },
                 )
+                if (server.source != null) {
+                    add(
+                        SheetAction(
+                            icon = AppIcons.Edit,
+                            title = tr("Дублировать во «Вручную»", "Duplicate into Manual"),
+                            subtitle = tr("Копию можно менять, подписка не тронется", "The copy is yours to change; the subscription stays as is"),
+                        ) { sheet.close { state.duplicateToManual(server) } },
+                    )
+                }
                 if (link != null) {
                     add(SheetAction(AppIcons.Qr, tr("QR-код", "QR code"), tr("Перенести на другое устройство", "Transfer to another device")) {
                         sheet.navigate(SheetPage.QR)
@@ -387,9 +422,6 @@ fun ServerActionsSheet(
                             clipboard.setText(AnnotatedString(link))
                             state.showBulletin(tr("Ссылка скопирована", "Link copied"), BulletinKind.SUCCESS)
                         }
-                    })
-                    add(SheetAction(AppIcons.Share, tr("Поделиться", "Share")) {
-                        sheet.close { state.share(link) }
                     })
                 }
                 add(
@@ -402,87 +434,15 @@ fun ServerActionsSheet(
                 )
             }
         },
-        onDismiss = onDismiss,
+        onDismiss = { sheetGone = true },
     )
 
-    if (editingNote) {
-        var name by remember { mutableStateOf(annotation.nameOverride) }
-        var note by remember { mutableStateOf(annotation.note) }
-        var tags by remember { mutableStateOf(annotation.tags.joinToString(", ")) }
-        var pinned by remember { mutableStateOf(annotation.pinned) }
-        var hidden by remember { mutableStateOf(annotation.hidden) }
-        AlertDialog(
-            onDismissRequest = { editingNote = false },
-            title = { Text(tr("Изменить узел", "Edit server"), fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text(tr("Своё имя", "Custom name")) },
-                        placeholder = { Text(server.name) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = note,
-                        onValueChange = { note = it },
-                        label = { Text(tr("Заметка", "Note")) },
-                        minLines = 2,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = tags,
-                        onValueChange = { tags = it },
-                        label = { Text(tr("Теги через запятую", "Tags separated by commas")) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(tr("Закрепить", "Pin"), style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                tr("Держать выше остальных", "Keep above the rest"),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        androidx.compose.material3.Switch(checked = pinned, onCheckedChange = { pinned = it })
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(tr("Скрыть", "Hide"), style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                tr("Убрать из списка, не удаляя", "Remove from the list without deleting"),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        androidx.compose.material3.Switch(checked = hidden, onCheckedChange = { hidden = it })
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    state.saveAnnotation(
-                        server.id,
-                        annotation.copy(
-                            nameOverride = name.trim(),
-                            note = note.trim(),
-                            tags = tags.split(',').map { it.trim() }.filter { it.isNotEmpty() },
-                            pinned = pinned,
-                            hidden = hidden,
-                        ),
-                    )
-                    editingNote = false
-                }) { Text(tr("Сохранить", "Save")) }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingNote = false }) { Text(tr("Отмена", "Cancel")) }
-            },
+    if (editingConfig) {
+        NodeEditorDialog(
+            state = state,
+            server = server,
+            editable = server.source == null,
+            onDismiss = { editingConfig = false },
         )
     }
 }
@@ -592,9 +552,7 @@ fun SubscriptionActionsSheet(
         details = null,
         buildActions = { sheet ->
             buildList {
-                add(SheetAction(AppIcons.Stopwatch, tr("Проверить пинг группы", "Ping group"), tr("Метод: ${state.pingMode.label}", "Method: ${pingModeTitle(state.pingMode)}")) {
-                    sheet.close { state.pingSource(source) }
-                })
+                // Пинг группы и сворачивание — уже кнопки на самой карточке, здесь не дублируем.
                 if (source != null) {
                     add(SheetAction(AppIcons.Refresh, tr("Обновить подписку", "Refresh subscription")) {
                         sheet.close {
@@ -610,16 +568,7 @@ fun SubscriptionActionsSheet(
                             state.showBulletin(tr("Ссылка скопирована", "Link copied"), BulletinKind.SUCCESS)
                         }
                     })
-                    add(SheetAction(AppIcons.Share, tr("Поделиться", "Share")) {
-                        sheet.close { state.share(source) }
-                    })
                 }
-                add(
-                    SheetAction(
-                        icon = if (collapsed) AppIcons.ChevronDown else AppIcons.ChevronUp,
-                        title = if (collapsed) tr("Развернуть список", "Expand list") else tr("Свернуть список", "Collapse list"),
-                    ) { sheet.close(onToggleCollapse) },
-                )
                 if (source != null) {
                     add(
                         SheetAction(

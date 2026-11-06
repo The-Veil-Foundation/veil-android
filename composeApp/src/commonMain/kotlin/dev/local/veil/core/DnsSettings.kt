@@ -62,9 +62,15 @@ data class DnsRule(
     val enabled: Boolean = true,
     val serverTag: String = "",
     val domains: List<String> = emptyList(),
+    /** Пакеты приложений (на macOS — имена процессов). */
+    val processNames: List<String> = emptyList(),
+    val ruleSets: List<String> = emptyList(),
+    /** Отвечать NXDOMAIN вместо маршрутизации запроса. */
     val reject: Boolean = false,
+    val invert: Boolean = false,
 ) {
-    val hasMatcher: Boolean get() = domains.isNotEmpty()
+    val hasMatcher: Boolean
+        get() = domains.isNotEmpty() || processNames.isNotEmpty() || ruleSets.isNotEmpty()
 }
 
 @Serializable

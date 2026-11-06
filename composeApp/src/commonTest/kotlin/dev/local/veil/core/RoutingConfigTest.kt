@@ -58,9 +58,54 @@ class RoutingConfigTest {
         val balancer = balancers[0].jsonObject
         assertEquals("proxy", balancer["tag"]!!.jsonPrimitive.content)
         assertEquals(2, (balancer["selector"] as JsonArray).size)
+        assertEquals("bal-0", balancer["fallbackTag"]!!.jsonPrimitive.content)
         assertTrue(config.containsKey("observatory"))
+        assertEquals(
+            "3m",
+            config["observatory"]!!.jsonObject["probeInterval"]!!.jsonPrimitive.content,
+        )
         val lastRule = (routing["rules"] as JsonArray).last().jsonObject
         assertEquals("proxy", lastRule["balancerTag"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun xrayUsesBatteryFriendlyKeepAlive() {
+        val config = json(XrayConfig.json(node, TunnelOptions()))
+        val proxy = (config["outbounds"] as JsonArray).map { it.jsonObject }
+            .first { it["tag"]?.jsonPrimitive?.content == "proxy" }
+        val sockopt = proxy["streamSettings"]!!.jsonObject["sockopt"]!!.jsonObject
+        assertEquals("60", sockopt["tcpKeepAliveIdle"]!!.jsonPrimitive.content)
+        assertEquals("30", sockopt["tcpKeepAliveInterval"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun xrayProbesLargeBalancerLessOften() {
+        // Каждая проба — отдельный запрос. На большом списке узлов раз в
+        // минуту это заметный расход батареи, поэтому интервал растёт.
+        val members = (1..21).map { node.copy(id = "m$it", name = "m$it") }
+        val config = json(XrayConfig.json(node, TunnelOptions(balancerMembers = members)))
+        assertEquals(
+            "5m",
+            config["observatory"]!!.jsonObject["probeInterval"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun singboxFragmentsTlsWhenEnabled() {
+        // Xray режет ClientHello через finalmask; sing-box должен делать то
+        // же, иначе на сетях с DPI Reality сбрасывается на рукопожатии.
+        val reality = node.copy(security = StreamSecurity.REALITY, sni = "example.com", publicKey = "pk")
+        fun proxyTls(fragment: Boolean): JsonObject {
+            val config = json(SingboxConfig.build(reality, TunnelOptions(fragment = fragment)).toString())
+            return config.outbounds().map { it.jsonObject }
+                .first { it["tag"]?.jsonPrimitive?.content == "proxy" }["tls"]!!.jsonObject
+        }
+        assertEquals("true", proxyTls(fragment = true)["fragment"]!!.jsonPrimitive.content)
+        assertTrue("fragment" !in proxyTls(fragment = false))
+        // Без TLS резать нечего: поле не появляется.
+        val plain = json(SingboxConfig.build(node, TunnelOptions(fragment = true)).toString())
+        val proxy = plain.outbounds().map { it.jsonObject }.first { it["tag"]?.jsonPrimitive?.content == "proxy" }
+        assertTrue(proxy["tls"]?.jsonObject?.get("fragment") == null)
     }
 
     @Test
@@ -85,6 +130,17 @@ class RoutingConfigTest {
         assertTrue(routeRules.any { it["outbound"]?.jsonPrimitive?.content == "block" })
         val servers = (config["dns"]!!.jsonObject["servers"] as JsonArray).map { it.jsonObject }
         assertTrue(servers.any { it["type"]?.jsonPrimitive?.content == "https" })
+    }
+
+    @Test
+    fun singboxProbesLargeBalancerLessOften() {
+        val members = (1..21).map { node.copy(id = "m$it", name = "m$it") }
+        val config = json(
+            SingboxConfig.build(node, TunnelOptions(balancerMembers = members)).toString(),
+        )
+        val proxy = (config["outbounds"] as JsonArray).map { it.jsonObject }
+            .first { it["tag"]?.jsonPrimitive?.content == "proxy" }
+        assertEquals("5m", proxy["interval"]!!.jsonPrimitive.content)
     }
 
     @Test

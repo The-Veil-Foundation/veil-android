@@ -3,6 +3,7 @@ package dev.local.veil.core
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -86,7 +87,8 @@ class SubscriptionConfigArrayTest {
         assertFalse("category-ads" in text)
         val rules = Json.parseToJsonElement(text).jsonObject["routing"]!!.jsonObject["rules"]!!.jsonArray
         assertEquals(3, rules.size)
-        // Балансировщик и observatory остаются как есть.
+        // Балансировщик и observatory остаются; слишком частые пробы подписки
+        // замедляются, чтобы не будить радио каждые 30 секунд.
         assertTrue("balancerTag" in text)
         assertTrue("leastLoad" in text)
     }
@@ -102,5 +104,79 @@ class SubscriptionConfigArrayTest {
     fun `inbounds are replaced by the tunnel`() {
         val text = XrayConfig.json(node(), TunnelOptions())
         assertTrue("\"protocol\":\"tun\"" in text)
+    }
+
+    @Test
+    fun `provider balancer gets a fallback tag`() {
+        val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
+        val balancer = config["routing"]!!.jsonObject["balancers"]!!.jsonArray.single().jsonObject
+        // Первый выход под селектором: до первого замера observatory и при
+        // упавших пробах leastLoad иначе возвращает пустой тег.
+        assertEquals("A-REALITY", balancer["fallbackTag"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `provider probes are slowed down for battery`() {
+        val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
+        val observatory = config["observatory"]!!.jsonObject
+        // 30s из подписки: каждая проба — HTTPS-запрос через узел.
+        assertEquals("3m", observatory["probeInterval"]!!.jsonPrimitive.content)
+        assertEquals(2, observatory["subjectSelector"]!!.jsonArray.size)
+    }
+
+    @Test
+    fun `provider burst probes are slowed down for battery`() {
+        val withBurst = body.replace(
+            "\"remarks\": \"Тест · Эстония\",",
+            "\"burstObservatory\": { \"subjectSelector\": [\"A-REALITY\"], " +
+                "\"pingConfig\": { \"destination\": \"https://www.gstatic.com/generate_204\", " +
+                "\"interval\": \"10s\", \"sampling\": 3, \"timeout\": \"5s\" } },\n        " +
+                "\"remarks\": \"Тест · Эстония\",",
+        )
+        val parsed = SubscriptionPayload.classify(withBurst)
+        assertIs<SubscriptionPayload.Body.Ok>(parsed)
+        val config = Json.parseToJsonElement(
+            XrayConfig.json(parsed.nodes.single(), TunnelOptions()),
+        ).jsonObject
+        val ping = config["burstObservatory"]!!.jsonObject["pingConfig"]!!.jsonObject
+        // 10s × 3 = 30s между пачками — слишком часто; 180s / 3 = 60s.
+        assertEquals("60s", ping["interval"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `provider tcp keepalive is relaxed for mobile networks`() {
+        val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
+        val outbounds = config["outbounds"]!!.jsonArray.map { it.jsonObject }
+        val reality = outbounds.first { it["tag"]?.jsonPrimitive?.content == "A-REALITY" }
+        val sockopt = reality["streamSettings"]!!.jsonObject["sockopt"]!!.jsonObject
+        assertEquals("60", sockopt["tcpKeepAliveIdle"]!!.jsonPrimitive.content)
+        assertEquals("30", sockopt["tcpKeepAliveInterval"]!!.jsonPrimitive.content)
+        // freedom/blackhole не держат соединение с узлом — их не трогаем.
+        val direct = outbounds.first { it["tag"]?.jsonPrimitive?.content == "direct" }
+        assertTrue(direct["streamSettings"] == null)
+    }
+
+    @Test
+    fun `provider policy keeps its levels and gets outbound counters`() {
+        val withPolicy = body.replace(
+            "\"remarks\": \"Тест · Эстония\",",
+            "\"policy\": { \"levels\": { \"0\": { \"connIdle\": 300 } }, " +
+                "\"system\": { \"statsInboundUplink\": true } },\n        " +
+                "\"remarks\": \"Тест · Эстония\",",
+        )
+        val parsed = SubscriptionPayload.classify(withPolicy)
+        assertIs<SubscriptionPayload.Body.Ok>(parsed)
+        val config = Json.parseToJsonElement(
+            XrayConfig.json(parsed.nodes.single(), TunnelOptions()),
+        ).jsonObject
+        val policy = config["policy"]!!.jsonObject
+        assertEquals(
+            "300",
+            policy["levels"]!!.jsonObject["0"]!!.jsonObject["connIdle"]!!.jsonPrimitive.content,
+        )
+        val system = policy["system"]!!.jsonObject
+        assertTrue(system["statsInboundUplink"]!!.jsonPrimitive.content.toBoolean())
+        assertTrue(system["statsOutboundUplink"]!!.jsonPrimitive.content.toBoolean())
+        assertTrue(system["statsOutboundDownlink"]!!.jsonPrimitive.content.toBoolean())
     }
 }

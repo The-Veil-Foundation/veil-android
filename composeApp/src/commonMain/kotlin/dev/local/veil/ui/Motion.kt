@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -20,16 +21,34 @@ import kotlinx.coroutines.delay
 /**
  * Material 3 Expressive motion: быстрые пружины с живым отскоком (stiffness=800+).
  * Эффект присутствия, но отклик мгновенный.
+ *
+ * [LocalReduceMotion] включается на слабых устройствах: анимации появления и
+ * постоянные морфы там только роняют кадры, поэтому они выключаются целиком.
  */
+
+internal val LocalReduceMotion = staticCompositionLocalOf { false }
+
+/**
+ * Токены движения из Material 3 Expressive (motion physics):
+ * spatial-пружины с лёгким отскоком для перемещений и формы,
+ * effects-пружины без отскока для цвета/прозрачности.
+ */
+internal object VeilMotion {
+    val fastSpatial = spring<Float>(dampingRatio = 0.9f, stiffness = 1400f)
+    val defaultSpatial = spring<Float>(dampingRatio = 0.9f, stiffness = 700f)
+    val slowSpatial = spring<Float>(dampingRatio = 0.9f, stiffness = 300f)
+    val fastEffects = spring<Float>(dampingRatio = 1f, stiffness = 3800f)
+    val defaultEffects = spring<Float>(dampingRatio = 1f, stiffness = 1600f)
+}
 
 /** Пружинное вдавливание при нажатии — характерная физика Expressive. */
 @Composable
 internal fun pressScale(source: MutableInteractionSource, pressed: Float = 0.95f): Float {
-    if (LocalTvMode.current) return 1f
+    if (LocalTvMode.current || LocalReduceMotion.current) return 1f
     val isPressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (isPressed) pressed else 1f,
-        animationSpec = tween(180),
+        animationSpec = VeilMotion.fastSpatial,
         label = "press",
     )
     return scale
@@ -41,13 +60,13 @@ internal fun pressScale(source: MutableInteractionSource, pressed: Float = 0.95f
  */
 @Composable
 internal fun Modifier.staggerIn(seen: MutableSet<Any>, key: Any, index: Int): Modifier {
-    if (LocalTvMode.current) return this
+    if (LocalTvMode.current || LocalReduceMotion.current) return this
     val already = remember { key in seen }
     val progress = remember { Animatable(if (already) 1f else 0f) }
     LaunchedEffect(Unit) {
         if (!already) {
             delay(index.coerceIn(0, 6) * 10L)
-            progress.animateTo(1f, tween(180))
+            progress.animateTo(1f, VeilMotion.defaultSpatial)
             seen += key
         }
     }

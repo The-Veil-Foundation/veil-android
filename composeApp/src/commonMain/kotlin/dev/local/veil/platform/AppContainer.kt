@@ -29,6 +29,9 @@ data class VpnStatus(
 interface VpnController {
     val status: StateFlow<VpnStatus>
 
+    /** Приложение на экране: в фоне таймеры и счётчики не крутим. */
+    val foreground: StateFlow<Boolean>
+
     /** Версия ядра, если оно собрано в APK. */
     val coreVersion: String?
     val coreAvailable: Boolean
@@ -45,6 +48,19 @@ interface VpnController {
      * null — узел не отвечает или ядра нет.
      */
     suspend fun realPing(server: ProxyConfig, options: TunnelOptions, timeoutMs: Int = 4000): Int? = null
+
+    /**
+     * Реальная задержка для многих узлов сразу. Результат по каждому узлу
+     * приходит в [report] по мере готовности. По умолчанию — по одному.
+     */
+    suspend fun realPingBatch(
+        servers: List<ProxyConfig>,
+        options: TunnelOptions,
+        timeoutMs: Int = 3000,
+        report: suspend (id: String, ms: Int?) -> Unit,
+    ) {
+        servers.forEach { report(it.id, realPing(it, options, timeoutMs)) }
+    }
 
     suspend fun connect(server: ProxyConfig, options: TunnelOptions): Result<Unit>
     suspend fun disconnect()
@@ -93,9 +109,17 @@ data class SubscriptionFetch(
 )
 
 interface SubscriptionFetcher {
-    suspend fun fetch(url: String): Result<SubscriptionFetch>
-    /** Стабильный идентификатор устройства, если панель его спрашивает. */
+    /**
+     * [userAgent] — свой UA источника; null или пусто — общий [userAgent].
+     * [hwid] — что слать в `X-Hwid`: null — не слать вовсе.
+     */
+    suspend fun fetch(url: String, userAgent: String? = null, hwid: String? = deviceId): Result<SubscriptionFetch>
+    /** Идентификатор устройства для панелей (HWID), 16 hex-символов как на macOS. */
     val deviceId: String
+    /** Выпускает новый HWID: для панели это новое устройство. */
+    fun regenerateDeviceId(): String
+    /** Ставит HWID, выданный провайдером, как есть (только без пробелов по краям). */
+    fun setDeviceId(raw: String): String?
     /**
      * Панели отдают разный формат в зависимости от клиента: список ссылок
      * или полный конфиг с маршрутами. Выбор UA — это выбор формата.
@@ -107,7 +131,8 @@ interface SubscriptionFetcher {
 interface GeoService {
     val directory: String
     val hasAssets: Boolean
-    suspend fun download(source: GeoAssetSource): Result<Unit>
+    /** [customGeoip]/[customGeosite] — адреса для [GeoAssetSource.CUSTOM]. */
+    suspend fun download(source: GeoAssetSource, customGeoip: String = "", customGeosite: String = ""): Result<Unit>
 }
 
 /** Доступ к логам ядра из интерфейса. */
@@ -116,6 +141,13 @@ interface LogProvider {
     val path: String
     suspend fun read(): String
     fun clear()
+
+    /**
+     * Лог пробного ядра: пинги и проверки узлов. На Android для них часто
+     * работает sing-box, даже когда туннель держит Xray.
+     */
+    suspend fun readChecks(): String = ""
+    fun clearChecks() {}
 }
 
 /** Релиз с GitHub, который можно поставить поверх текущей версии. */
@@ -150,4 +182,10 @@ interface AppContainer {
 
     /** Перенос на другие устройства и «Поделиться»; по умолчанию недоступен. */
     val transfer: TransferService get() = NoTransferService
+
+    /**
+     * Проверяет конфиг ядром, которое его запустит, не запуская туннель.
+     * null — ядра нет (сборка без .aar): проверять нечем.
+     */
+    fun checkConfig(engine: dev.local.veil.core.CoreEngine, configJson: String): Result<Unit>? = null
 }

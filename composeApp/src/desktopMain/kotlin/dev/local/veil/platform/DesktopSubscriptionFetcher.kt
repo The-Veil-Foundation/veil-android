@@ -10,36 +10,51 @@ import java.util.UUID
 class DesktopSubscriptionFetcher : SubscriptionFetcher {
     private val idFile = File(System.getProperty("user.home"), ".veil/hwid.txt")
 
-    override val deviceId: String by lazy {
-        runCatching { idFile.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: run {
-            val generated = UUID.randomUUID().toString().replace("-", "").take(16)
-            runCatching {
-                idFile.parentFile?.mkdirs()
-                idFile.writeText(generated)
-            }
-            generated
+    override val deviceId: String
+        get() {
+            val stored = runCatching { idFile.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return regenerateDeviceId()
+            val upper = stored.uppercase()
+            return if (upper != stored) write(upper) else upper
         }
+
+    override fun regenerateDeviceId(): String = write(dev.local.veil.core.DeviceIds.mint())
+
+    override fun setDeviceId(raw: String): String? =
+        dev.local.veil.core.DeviceIds.normalizedManual(raw)?.let(::write)
+
+    private fun write(value: String): String {
+        runCatching {
+            idFile.parentFile?.mkdirs()
+            idFile.writeText(value)
+        }
+        return value
     }
 
     private val uaFile = File(System.getProperty("user.home"), ".veil/user-agent.txt")
 
     override var userAgent: String
-        get() = runCatching { uaFile.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: "Veil/0.1"
+        get() = dev.local.veil.core.effectiveUserAgent(runCatching { uaFile.readText() }.getOrNull())
         set(value) {
             runCatching {
-                uaFile.parentFile?.mkdirs()
-                uaFile.writeText(value.ifBlank { "Veil/0.1" })
+                val custom = value.trim()
+                if (custom.isEmpty() || custom in dev.local.veil.core.LEGACY_DEFAULT_USER_AGENTS) {
+                    uaFile.delete()
+                } else {
+                    uaFile.parentFile?.mkdirs()
+                    uaFile.writeText(custom)
+                }
             }
         }
 
-    override suspend fun fetch(url: String): Result<SubscriptionFetch> = withContext(Dispatchers.IO) {
+    override suspend fun fetch(url: String, userAgent: String?, hwid: String?): Result<SubscriptionFetch> = withContext(Dispatchers.IO) {
+        val agent = userAgent?.trim()?.takeIf { it.isNotEmpty() } ?: this@DesktopSubscriptionFetcher.userAgent
         runCatching {
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 20_000
                 readTimeout = 60_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", userAgent)
-                setRequestProperty("X-Hwid", deviceId)
+                setRequestProperty("User-Agent", agent)
+                if (hwid != null) setRequestProperty("X-Hwid", hwid)
                 setRequestProperty("X-Device-OS", "Linux")
                 setRequestProperty("X-Device-Model", System.getProperty("os.arch") ?: "desktop")
                 setRequestProperty("X-Ver-OS", System.getProperty("os.version") ?: "")

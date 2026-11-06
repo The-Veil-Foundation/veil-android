@@ -57,19 +57,24 @@ fun pingModeHint(mode: dev.local.veil.platform.PingMode): String = when (mode) {
         )
 }
 
-/** Подписи пресетов маршрутизации. */
+/** Подписи пресетов маршрутизации — тексты macOS (RoutingPreset.title/subtitle). */
 fun routingPresetTitle(preset: dev.local.veil.core.RoutingPreset): String = when (preset) {
-    dev.local.veil.core.RoutingPreset.GLOBAL -> tr("Всё через прокси", "Everything via proxy")
-    dev.local.veil.core.RoutingPreset.BYPASS_LAN -> tr("Кроме локальной сети", "Except local network")
-    dev.local.veil.core.RoutingPreset.BYPASS_RU -> tr("Россия напрямую", "Russia direct")
-    dev.local.veil.core.RoutingPreset.CUSTOM -> tr("Свои правила", "Custom rules")
+    dev.local.veil.core.RoutingPreset.GLOBAL -> tr("Всё через прокси", "Global")
+    dev.local.veil.core.RoutingPreset.BYPASS_LAN -> tr("Кроме локальной сети", "Bypass LAN")
+    dev.local.veil.core.RoutingPreset.BYPASS_CHINA -> tr("Китай напрямую", "Bypass China")
+    dev.local.veil.core.RoutingPreset.BYPASS_RU -> tr("Россия напрямую", "Bypass Russia")
+    dev.local.veil.core.RoutingPreset.CUSTOM -> tr("Свои правила", "Custom")
 }
 
 fun routingPresetSubtitle(preset: dev.local.veil.core.RoutingPreset): String = when (preset) {
-    dev.local.veil.core.RoutingPreset.GLOBAL -> tr("Весь трафик идёт в туннель", "All traffic goes through the tunnel")
-    dev.local.veil.core.RoutingPreset.BYPASS_LAN -> tr("Локальные адреса — напрямую", "Local addresses go direct")
-    dev.local.veil.core.RoutingPreset.BYPASS_RU -> tr(".ru, .su, .рф — мимо туннеля", ".ru, .su, .рф bypass the tunnel")
-    dev.local.veil.core.RoutingPreset.CUSTOM -> tr("Собственный список правил", "Your own rule list")
+    dev.local.veil.core.RoutingPreset.GLOBAL -> tr("Весь трафик через прокси.", "All traffic through the proxy.")
+    dev.local.veil.core.RoutingPreset.BYPASS_LAN ->
+        tr("Всё через прокси, кроме локальных адресов.", "Proxy everything except local/LAN addresses.")
+    dev.local.veil.core.RoutingPreset.BYPASS_CHINA ->
+        tr("Сайты Китая и LAN напрямую, остальное через прокси.", "Mainland China sites & LAN go direct, rest via proxy.")
+    dev.local.veil.core.RoutingPreset.BYPASS_RU ->
+        tr("Российские и госсайты .ru напрямую, остальное через прокси.", "Russian & .ru-gov sites go direct, rest via proxy.")
+    dev.local.veil.core.RoutingPreset.CUSTOM -> tr("Свой упорядоченный список правил.", "Your own ordered rule list.")
 }
 
 fun groupKindTitle(kind: dev.local.veil.core.GroupKind): String =

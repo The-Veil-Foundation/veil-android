@@ -84,13 +84,23 @@ object XrayBridge {
     }
 
     fun uplinkTotal(): Long {
-        val c = clazz ?: return 0L
-        return runCatching { c.getMethod("uplinkTotal").invoke(null) as? Long ?: 0L }.getOrDefault(0L)
+        val method = uplinkMethod ?: return 0L
+        return runCatching { method.invoke(null) as? Long ?: 0L }.getOrDefault(0L)
     }
 
     fun downlinkTotal(): Long {
-        val c = clazz ?: return 0L
-        return runCatching { c.getMethod("downlinkTotal").invoke(null) as? Long ?: 0L }.getOrDefault(0L)
+        val method = downlinkMethod ?: return 0L
+        return runCatching { method.invoke(null) as? Long ?: 0L }.getOrDefault(0L)
+    }
+
+    // Спидометр читает счётчики раз в секунду: getMethod на каждом тике —
+    // лишняя работа в главном потоке, поэтому ищем методы один раз.
+    private val uplinkMethod: java.lang.reflect.Method? by lazy {
+        clazz?.let { runCatching { it.getMethod("uplinkTotal") }.getOrNull() }
+    }
+
+    private val downlinkMethod: java.lang.reflect.Method? by lazy {
+        clazz?.let { runCatching { it.getMethod("downlinkTotal") }.getOrNull() }
     }
 
     private fun callString(name: String): String? =
