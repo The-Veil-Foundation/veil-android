@@ -16,6 +16,7 @@ import dev.local.veil.R
 import dev.local.veil.core.CoreEngine
 import dev.local.veil.core.SplitMode
 import dev.local.veil.core.TunnelOptions
+import dev.local.veil.core.TunAddress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -199,11 +200,11 @@ class VeilVpnService : VpnService() {
         val builder = Builder()
             .setSession("Veil")
             .setMtu(params.mtu)
-            .addAddress("198.18.0.1", 24)
+            .addAddress(TunAddress.IPV4, TunAddress.IPV4_PREFIX)
             .addRoute("0.0.0.0", 0)
 
         if (params.ipv6) {
-            builder.addAddress("fd6e:a81b:704f:1211::1", 64)
+            builder.addAddress(TunAddress.IPV6, TunAddress.IPV6_PREFIX)
             builder.addRoute("::", 0)
         }
 

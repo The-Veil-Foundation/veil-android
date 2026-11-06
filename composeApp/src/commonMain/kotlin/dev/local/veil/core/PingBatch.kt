@@ -146,7 +146,7 @@ object PingBatch {
             }
         }
         doc["outbounds"] = buildJsonArray {
-            nodes.forEachIndexed { index, node -> add(SingboxConfig.outbound(node, outboundTag(index))) }
+            nodes.forEachIndexed { index, node -> add(SingboxConfig.outbound(node, outboundTag(index), options.fragment)) }
             service.forEach { add(it) }
         }
         doc["route"] = buildJsonObject {

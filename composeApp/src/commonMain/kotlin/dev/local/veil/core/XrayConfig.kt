@@ -523,7 +523,10 @@ object XrayConfig {
         put("access", if (options.logLevel == "debug") "" else "none")
         options.logFile?.takeIf { it.isNotEmpty() }?.let {
             put("error", it)
-            put("access", "$it.access")
+            // Access-лог — строка на диск на каждое соединение, и файл растёт
+            // без ротации. Экран логов его не читает, поэтому пишем только в
+            // отладке, иначе в фоне это постоянная запись и лишний расход.
+            if (options.logLevel == "debug") put("access", "$it.access")
         }
     }
 

@@ -96,8 +96,8 @@ object SingboxConfig {
                         put("tag", "tun-in")
                         put("interface_name", inbound.name)
                         putJsonArray("address") {
-                            add("172.19.0.1/30")
-                            if (options.ipv6) add("fdfe:dcba:9876::1/126")
+                            add("${TunAddress.IPV4}/${TunAddress.IPV4_PREFIX}")
+                            if (options.ipv6) add("${TunAddress.IPV6}/${TunAddress.IPV6_PREFIX}")
                         }
                         put("mtu", inbound.mtu)
                         // TUN создаёт VpnService (маршруты, DNS и split-tunnel
@@ -125,7 +125,7 @@ object SingboxConfig {
 
             putJsonArray("outbounds") {
                 if (useBalancer) {
-                    balancer.forEachIndexed { index, member -> add(outbound(member, "bal-$index")) }
+                    balancer.forEachIndexed { index, member -> add(outbound(member, "bal-$index", options.fragment)) }
                     addJsonObject {
                         put("type", "urltest")
                         put("tag", TAG_PROXY)
@@ -135,9 +135,9 @@ object SingboxConfig {
                         put("tolerance", 50)
                     }
                 } else {
-                    add(outbound(cfg, TAG_PROXY))
+                    add(outbound(cfg, TAG_PROXY, options.fragment))
                 }
-                graph.servers.forEach { server -> add(outbound(server, ProfileTags.server(server.id))) }
+                graph.servers.forEach { server -> add(outbound(server, ProfileTags.server(server.id), options.fragment)) }
                 graph.groups.forEach { (group, members) -> add(groupOutbound(group, members)) }
                 addJsonObject {
                     put("type", "direct")
@@ -305,7 +305,20 @@ object SingboxConfig {
         options.logFile?.let { put("output", it) }
     }
 
-    internal fun outbound(cfg: ProxyConfig, tag: String): JsonObject = buildJsonObject {
+    /**
+     * Выход узла. [fragment] — та же защита от DPI, что finalmask у Xray:
+     * ClientHello режется на куски, и цельный SNI не виден. Без неё на
+     * сетях с DPI соединение сбрасывается ещё на рукопожатии.
+     */
+    internal fun outbound(cfg: ProxyConfig, tag: String, fragment: Boolean = false): JsonObject {
+        val base = baseOutbound(cfg, tag)
+        if (!fragment) return base
+        val tls = base["tls"] as? JsonObject ?: return base
+        if ((tls["enabled"] as? JsonPrimitive)?.booleanOrNull != true) return base
+        return JsonObject(base + ("tls" to JsonObject(tls + ("fragment" to JsonPrimitive(true)))))
+    }
+
+    private fun baseOutbound(cfg: ProxyConfig, tag: String): JsonObject = buildJsonObject {
         put("tag", tag)
 
         when (cfg.proto) {
