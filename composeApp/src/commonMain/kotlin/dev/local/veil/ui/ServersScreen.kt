@@ -1,46 +1,23 @@
 package dev.local.veil.ui
 
-import androidx.compose.foundation.layout.widthIn
-
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.material3.Button
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.height
-import dev.local.veil.platform.PingMode
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.draw.rotate
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,38 +25,46 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.local.veil.core.ProxyConfig
-import dev.local.veil.platform.VpnPhase
 import dev.local.veil.platform.VpnStatus
 
 /** Группа серверов: одна подписка или «вручную». */
@@ -468,7 +453,7 @@ internal fun SearchPill(query: String, onQueryChange: (String) -> Unit, modifier
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -500,7 +485,7 @@ internal fun SearchPill(query: String, onQueryChange: (String) -> Unit, modifier
             if (query.isNotEmpty()) {
                 IconButton(
                     onClick = { onQueryChange("") },
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     AppIcon(
                         AppIcons.Close,
@@ -650,7 +635,7 @@ private fun SubscriptionCard(
     )
     Surface(
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = bottom, bottomEnd = bottom),
-        color = scheme.surfaceContainerLow,
+        color = scheme.surfaceContainer,
         modifier = modifier.fillMaxWidth().padding(bottom = 2.dp),
     ) {
         Column(Modifier.padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = if (subscription != null) 16.dp else 6.dp)) {
@@ -662,7 +647,7 @@ private fun SubscriptionCard(
                     Text(
                         group.title,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -791,16 +776,13 @@ private fun ServerRow(
     // возвращается — как в Material 3 Expressive.
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.965f else 1f,
-        animationSpec = VeilMotion.fastSpatial,
-        label = "row-press",
-    )
+    val scale = pressScale(interaction, .98f)
 
     // Сегментированный список как в bottom sheet: крайние строки крупнее.
     val corner by animateDpAsState(
-        targetValue = if (selected) 32.dp else 24.dp,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 1400f),
+        targetValue = if (pressed) 16.dp else if (selected) 28.dp else 24.dp,
+        animationSpec = if (LocalReduceMotion.current || LocalTvMode.current) androidx.compose.animation.core.snap()
+            else spring(dampingRatio = 0.75f, stiffness = 700f),
         label = "row-corner",
     )
     val rowColor by animateColorAsState(
@@ -815,8 +797,8 @@ private fun ServerRow(
         label = "row-fg",
     )
     val haptics = LocalHapticFeedback.current
-    val topRadius = if (first) corner else Md3Shapes.xs
-    val bottomRadius = if (last) corner else Md3Shapes.xs
+    val topRadius = if (first || selected || pressed) corner else Md3Shapes.xs
+    val bottomRadius = if (last || selected || pressed) corner else Md3Shapes.xs
     val rowShape = RoundedCornerShape(
         topStart = topRadius,
         topEnd = topRadius,
@@ -846,14 +828,29 @@ private fun ServerRow(
             ),
     ) {
         Row(
-            Modifier.padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 14.dp),
+            Modifier.heightIn(min = 76.dp).padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Surface(
+                shape = rememberMorphShape(selected, MaterialShapePresets.Cookie, turn = .25f),
+                color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = if (selected) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                    AppIcon(
+                        if (selected) AppIcons.Check else AppIcons.Server,
+                        contentDescription = if (selected) tr("Выбран", "Selected") else null,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = server.name,
-                    style = MaterialTheme.typography.titleSmall,
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -865,7 +862,8 @@ private fun ServerRow(
                         "${server.proto.wire.uppercase()} · ${server.endpoint}"
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

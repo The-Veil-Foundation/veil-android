@@ -626,6 +626,21 @@ class AndroidLogProvider(private val file: java.io.File) : LogProvider {
 }
 
 class AndroidContainer(activity: ComponentActivity) : AppContainer {
+    override val openNotificationSettings: () -> Unit = {
+        val settingsIntent = android.content.Intent(
+            if (android.os.Build.VERSION.SDK_INT >= 36) "android.settings.APP_NOTIFICATION_PROMOTION_SETTINGS"
+            else android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+        ).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        try {
+            activity.startActivity(settingsIntent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            activity.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(android.net.Uri.parse("package:${activity.packageName}")),
+            )
+        }
+    }
+
     private val geoDir = File(activity.filesDir, "geo").apply { mkdirs() }.absolutePath
     // Лог ядра — во внешнем каталоге приложения: adb читает его без run-as
     // (run-as на этом устройстве падает на SELinux).

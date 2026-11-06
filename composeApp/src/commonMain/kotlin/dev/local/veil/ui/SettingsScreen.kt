@@ -72,7 +72,7 @@ fun SettingsScreen(
         SettingsGroup(
             title = tr("Подключение", "Connection"),
             icon = AppIcons.Power,
-            rows = listOf(
+            rows = listOf<@Composable () -> Unit>(
                 {
                     SegmentSwitch(
                         title = tr("Подключаться при запуске", "Connect on launch"),
@@ -96,12 +96,26 @@ fun SettingsScreen(
                 },
                 {
                     SegmentSwitch(
-                        title = tr("Уведомление в шторке", "Notification in the shade"),
-                        subtitle = tr("Состояние VPN и быстрые действия", "VPN status and quick actions"),
+                        title = tr("Живое уведомление", "Live notification"),
+                        subtitle = tr(
+                            "Таймер VPN и быстрые действия. На Android 16 — индикатор в строке состояния",
+                            "VPN timer and quick actions. On Android 16, a status bar chip",
+                        ),
                         checked = settings.liveNotification,
                         onCheckedChange = { state.saveSettings(settings.copy(liveNotification = it)) },
                         icon = AppIcons.Bell,
                     )
+                },
+            ) + listOfNotNull<@Composable () -> Unit>(
+                state.openNotificationSettings?.takeUnless { state.isTv }?.let { openSettings ->
+                    @Composable {
+                        SegmentAction(
+                            title = tr("Настройки уведомлений Android", "Android notification settings"),
+                            subtitle = tr("Разрешения и показ живых уведомлений", "Permissions and Live Update visibility"),
+                            icon = AppIcons.Settings,
+                            onClick = openSettings,
+                        )
+                    }
                 },
             ),
         )

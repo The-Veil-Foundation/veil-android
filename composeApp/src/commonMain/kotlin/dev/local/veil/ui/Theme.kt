@@ -1,6 +1,7 @@
 package dev.local.veil.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -9,12 +10,11 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import dev.local.veil.core.AppStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.local.veil.core.AppStyle
 
 /**
  * Material You: на Android 12+ палитра берётся из обоев пользователя,
@@ -111,9 +111,7 @@ fun OrbitTheme(
     val base = dynamicColorScheme(dark) ?: if (dark) FallbackDark else FallbackLight
     val scheme = if (pitchBlack) pitchBlackScheme(base) else base
 
-    // MaterialExpressiveTheme в Compose Multiplatform 1.9 ещё помечен internal
-    // (публичен только в androidx-сборке), поэтому берём MaterialTheme и
-    // добавляем экспрессивность сами: формы, типографика и Motion.kt.
+    // Общая тема для Android и остальных платформ проекта.
     MaterialTheme(
         colorScheme = animatedColorScheme(scheme),
         typography = orbitTypography(),
@@ -186,7 +184,7 @@ private fun animatedColorScheme(target: ColorScheme): ColorScheme {
 internal fun orbitShapes() = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
+    medium = RoundedCornerShape(20.dp),
     large = RoundedCornerShape(28.dp),
     extraLarge = RoundedCornerShape(36.dp),
 )
@@ -201,7 +199,7 @@ internal fun orbitTypography(): Typography {
     // плотнее трекинг и тяжелее вес для заголовков и подписей.
     return base.copy(
         displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
-        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp),
+        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
         headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp),
         headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
         titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.sp),

@@ -49,6 +49,8 @@ class VeilState(
     private val container: AppContainer,
     private val scope: CoroutineScope,
 ) {
+    val openNotificationSettings: (() -> Unit)? get() = container.openNotificationSettings
+
     // Ленивая загрузка для ускорения старта: серверы/подписки грузим в фоне.
     var settings by mutableStateOf(container.settings.load().migrated())
         private set
@@ -1172,7 +1174,7 @@ class VeilState(
     }
 }
 
-/** Тип всплывающего сообщения: от него зависит цвет и время показа. */
+/** Ошибки показываются дольше обычных сообщений. */
 enum class BulletinKind { INFO, SUCCESS, ERROR }
 
 data class Bulletin(val id: Long, val text: String, val kind: BulletinKind)

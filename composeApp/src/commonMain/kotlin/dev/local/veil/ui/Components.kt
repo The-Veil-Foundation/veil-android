@@ -3,12 +3,7 @@ package dev.local.veil.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -20,7 +15,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -29,36 +23,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.local.veil.core.ProxyConfig
 import dev.local.veil.platform.VpnPhase
 import dev.local.veil.platform.VpnStatus
-import kotlinx.coroutines.delay
 
 /**
  * Логотип Veil — открытый защитный контур из Figma.
@@ -138,37 +125,39 @@ fun StatusCard(
 
     val connected = status.isConnected
     val working = checking || status.phase == VpnPhase.CONNECTING
+    val reduceMotion = LocalReduceMotion.current || LocalTvMode.current
+    val scheme = MaterialTheme.colorScheme
 
     val container by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.errorContainer
+            connected -> scheme.primaryContainer
+            else -> scheme.secondaryContainer
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(220),
         label = "status-bg",
     )
     val content by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.onErrorContainer
+            connected -> scheme.onPrimaryContainer
+            else -> scheme.onSecondaryContainer
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(220),
         label = "status-fg",
     )
 
     // Экспрессивная форма: карточка «раскрывается» при подключении, быстро.
     val big by animateFloatAsState(
         targetValue = if (connected) 44f else 32f,
-        animationSpec = tween(180),
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else VeilMotion.defaultSpatial,
         label = "status-corner",
     )
     val small by animateFloatAsState(
         targetValue = if (connected) 24f else 32f,
-        animationSpec = tween(180),
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else VeilMotion.defaultSpatial,
         label = "status-corner-small",
     )
-    val lift by animateDpAsState(
-        targetValue = if (connected) 6.dp else 0.dp,
-        animationSpec = tween(180),
-        label = "status-lift",
-    )
-
     val cardShape = RoundedCornerShape(
         topStart = big.dp,
         topEnd = big.dp,
@@ -180,11 +169,14 @@ fun StatusCard(
         color = container,
         contentColor = content,
         shape = cardShape,
-        shadowElevation = lift,
+        shadowElevation = 0.dp,
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(
                     text = when {
                         checking -> tr("Проверяем сервер…", "Checking server…")
@@ -194,41 +186,48 @@ fun StatusCard(
                         status.phase == VpnPhase.ERROR -> tr("Ошибка", "Error")
                         else -> tr("Не защищено", "Unprotected")
                     },
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
-                AnimatedVisibility(
-                    visible = connected,
-                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                Surface(
+                    shape = rememberMorphShape(connected, MaterialShapePresets.Cookie, turn = .25f),
+                    color = if (status.phase == VpnPhase.ERROR) scheme.error else scheme.primary,
+                    contentColor = if (status.phase == VpnPhase.ERROR) scheme.onError else scheme.onPrimary,
                 ) {
-                    Text(
-                        text = formatDuration(seconds),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
+                        if (working) ExpressiveLoader(diameter = 32.dp, color = scheme.onPrimary)
+                        else AppIcon(
+                            if (connected) AppIcons.Shield else if (status.phase == VpnPhase.ERROR) AppIcons.Danger else AppIcons.Power,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
                 }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = shown?.let { "${it.proto.wire.uppercase()} · ${it.endpoint}" } ?: "—",
+                    text = shown?.let {
+                        if (connected) "${it.proto.wire.uppercase()} · ${formatDuration(seconds)}"
+                        else "${it.proto.wire.uppercase()} · ${it.endpoint}"
+                    } ?: tr("Выберите сервер ниже", "Choose a server below"),
                     style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
 
             AnimatedVisibility(
                 visible = connected,
-                enter = expandVertically(tween(180)) + fadeIn(),
-                exit = shrinkVertically(tween(180)) + fadeOut(),
+                enter = if (reduceMotion) androidx.compose.animation.EnterTransition.None else expandVertically(spring(dampingRatio = .85f, stiffness = 700f)) + fadeIn(),
+                exit = if (reduceMotion) androidx.compose.animation.ExitTransition.None else shrinkVertically() + fadeOut(),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpeedChip(label = "↓", bytesPerSecond = status.downlinkSpeed)
@@ -244,20 +243,17 @@ fun StatusCard(
                 else -> tr("Подключить", "Connect")
             }
 
-            Button(
+            ExpressiveActionButton(
                 onClick = onToggle,
                 enabled = !working,
-                shape = MaterialTheme.shapes.large,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp)
-                    .tvFocusRing(MaterialTheme.shapes.large),
+                active = connected,
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 AnimatedContent(
                     targetState = label,
                     transitionSpec = {
-                        (fadeIn(tween(180)) + scaleIn(initialScale = 0.85f))
+                        if (reduceMotion) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                        else (fadeIn(tween(180)) + scaleIn(initialScale = 0.85f))
                             .togetherWith(fadeOut(tween(180)) + scaleOut(targetScale = 0.85f))
                     },
                     label = "button-label",
@@ -275,7 +271,7 @@ fun StatusCard(
                             )
                         }
                         Spacer(Modifier.size(8.dp))
-                        Text(text, fontWeight = FontWeight.Bold)
+                        Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -453,65 +449,6 @@ fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
                         fontWeight = FontWeight.Bold,
                     )
                 }
-            }
-        }
-    }
-}
-
-/**
- * Буллетин — всплывающее сообщение внизу экрана вместо баннера в списке.
- * Появляется пружинно, исчезает сам, тап закрывает досрочно.
- */
-@Composable
-fun BulletinHost(
-    bulletin: Bulletin?,
-    onDismiss: (Long) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // Держим последнее непустое значение, иначе текст исчезнет до конца анимации.
-    var last by remember { mutableStateOf<Bulletin?>(null) }
-    if (bulletin != null) last = bulletin
-    val shown = last
-
-    AnimatedVisibility(
-        visible = bulletin != null,
-        enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it },
-        exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it },
-        modifier = modifier,
-    ) {
-        val current = shown ?: return@AnimatedVisibility
-        LaunchedEffect(current.id) {
-            delay(if (current.kind == BulletinKind.ERROR) 6000 else 3200)
-            onDismiss(current.id)
-        }
-
-        val scheme = MaterialTheme.colorScheme
-        val (bg, fg, icon) = when (current.kind) {
-            BulletinKind.SUCCESS -> Triple(scheme.primaryContainer, scheme.onPrimaryContainer, AppIcons.Check)
-            BulletinKind.ERROR -> Triple(scheme.errorContainer, scheme.onErrorContainer, AppIcons.Danger)
-            BulletinKind.INFO -> Triple(scheme.secondaryContainer, scheme.onSecondaryContainer, AppIcons.Info)
-        }
-
-        Surface(
-            onClick = { onDismiss(current.id) },
-            shape = MaterialTheme.shapes.large,
-            color = bg,
-            contentColor = fg,
-            shadowElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                AppIcon(icon, modifier = Modifier.size(20.dp))
-                Text(
-                    text = current.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                )
             }
         }
     }

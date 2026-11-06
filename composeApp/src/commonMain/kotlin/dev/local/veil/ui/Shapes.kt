@@ -2,7 +2,6 @@ package dev.local.veil.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -11,10 +10,11 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.progressSemantics
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,25 +41,20 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.CornerRounding
-import androidx.graphics.shapes.circle
 import androidx.graphics.shapes.Cubic
 import androidx.graphics.shapes.Morph
 import androidx.graphics.shapes.RoundedPolygon
-import kotlinx.coroutines.delay
+import androidx.graphics.shapes.circle
 import kotlin.math.min
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /*
  * Material 3 Expressive на официальной библиотеке graphics-shapes.
  * Формы — RoundedPolygon, морфинг — через Morph (списки кубиков Безье),
- * а «щелкающая» анимация — через CubicBezierEasing с перелётом (snap + overshoot).
+ * Переходы формы используют пружины, индикатор загрузки вращается непрерывно.
  */
-
-/** Безье с перелётом: значение уходит за 1.0 и возвращается — эффект «snap + overshoot». */
-private val SnapEasing = CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f)
-
-private const val SNAP_MS = 420          // длительность рывка морфа
-private const val HOLD_MS = 360L         // замирание между рывками
-private const val ROTATION_STEP = 90f    // фиксированный угол рывка поворота
 
 /**
  * Шкала форм M3 Expressive: крупные скругления для карточек и листов,
@@ -68,7 +63,7 @@ private const val ROTATION_STEP = 90f    // фиксированный угол 
 object Md3Shapes {
     val xs = 8.dp
     val sm = 12.dp
-    val md = 18.dp
+    val md = 20.dp
     val lg = 28.dp
     val xl = 36.dp
 
@@ -140,8 +135,7 @@ class CubicsShape(
 }
 
 /**
- * Форма, которая быстро морфится из круга в [to] при [active]. Пружина жесткая
- * и быстрая (stiffness=600, dampingRatio=0.35).
+ * Переход из круга в [to] при [active], с учётом режима уменьшения анимаций.
  */
 @Composable
 fun rememberMorphShape(
@@ -151,17 +145,15 @@ fun rememberMorphShape(
 ): Shape {
     val t by animateFloatAsState(
         targetValue = if (active) 1f else 0f,
-        animationSpec = tween(180),
+        animationSpec = if (LocalReduceMotion.current || LocalTvMode.current) androidx.compose.animation.core.snap()
+            else VeilMotion.defaultSpatial,
         label = "morph",
     )
     val morph = remember(to) { Morph(MaterialShapePresets.Circle, to) }
-    return CubicsShape(morph.asCubics(t), rotationDegrees = t * turn * 60f)
+    return CubicsShape(morph.asCubics(t.coerceIn(0f, 1f)), rotationDegrees = t * turn * 60f)
 }
 
-/**
- * Лоадер в стиле Expressive: фигура замирает, затем резко трансформируется
- * в следующую (с отскоком) и одновременно поворачивается рывком на 90°.
- */
+/** Material loading sequence: seven silhouettes, spring morph and continuous rotation. */
 @Composable
 fun ExpressiveLoader(
     modifier: Modifier = Modifier,
@@ -169,61 +161,63 @@ fun ExpressiveLoader(
     color: Color = MaterialTheme.colorScheme.primary,
 ) {
     if (LocalTvMode.current || LocalReduceMotion.current) {
-        Canvas(modifier = modifier.size(diameter)) {
+        Canvas(modifier = modifier.progressSemantics().size(diameter)) {
             drawCircle(color = color, radius = size.minDimension / 2f)
         }
         return
     }
-    val sequence = remember {
-        listOf(
-            MaterialShapePresets.SoftTriangle,
-            MaterialShapePresets.Clover,
-            MaterialShapePresets.SoftPentagon,
-            MaterialShapePresets.Flower,
-            MaterialShapePresets.Sunny,
-            MaterialShapePresets.Cookie,
-        )
-    }
+    val sequence = LoadingShapes.sequence
     // Пары соседних форм для морфа (последняя → первая, цикл).
     val morphs = remember(sequence) {
         List(sequence.size) { i -> Morph(sequence[i], sequence[(i + 1) % sequence.size]) }
     }
 
     var index by remember { mutableIntStateOf(0) }
+    var turn by remember { mutableIntStateOf(0) }
     val progress = remember { Animatable(0f) }
+    val rotation = remember { Animatable(0f) }
     // Переиспользуемый Path: без аллокации на каждом кадре.
     val path = remember { Path() }
 
     LaunchedEffect(Unit) {
-        while (true) {
-            progress.snapTo(0f)                    // зафиксировать текущую форму
-            delay(HOLD_MS)                         // замирание
-            progress.animateTo(                    // резкий морф + рывок поворота
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = SNAP_MS, easing = SnapEasing),
-            )
-            index = (index + 1) % sequence.size
+        coroutineScope {
+            launch {
+                rotation.animateTo(360f, infiniteRepeatable(tween(4666, easing = LinearEasing)))
+            }
+            while (true) {
+                val morph = launch {
+                    progress.animateTo(1f, spring(dampingRatio = .6f, stiffness = 200f, visibilityThreshold = .1f))
+                    index = (index + 1) % sequence.size
+                    turn = (turn + 1) % 4
+                    progress.snapTo(0f)
+                }
+                delay(650)
+                morph.join()
+            }
         }
     }
 
     Canvas(
         modifier = modifier
+            .progressSemantics()
             .size(diameter)
             .drawWithCache {
-                // Безье с перелётом выходит за 1.0, а морф ожидает [0, 1].
+                // Пружина допускает перелёт, а морф ожидает [0, 1].
                 val t = progress.value.coerceIn(0f, 1f)
 
                 path.reset()
                 writeCubics(path, morphs[index].asCubics(t))
 
-                // Рывок поворота на 90° синхронно с морфом, с накоплением угла.
-                val rotation = ROTATION_STEP * (index + progress.value)
+                // Rotation accumulates independently of the seven-shape index.
+                val angle = 90f * (turn + progress.value) + rotation.value
                 val cx = this.size.width / 2f
                 val cy = this.size.height / 2f
-                val scale = min(this.size.width, this.size.height) / 2f
+                val scale = min(this.size.width, this.size.height) * .72f
+                val bounds = path.getBounds()
+                path.translate(-bounds.center)
 
                 onDrawBehind {
-                    rotate(degrees = rotation, pivot = Offset(cx, cy)) {
+                    rotate(degrees = angle, pivot = Offset(cx, cy)) {
                         translate(left = cx, top = cy) {
                             scale(scale = scale, pivot = Offset.Zero) {
                                 drawPath(path, color)
@@ -233,6 +227,25 @@ fun ExpressiveLoader(
                 }
             },
     ) {}
+}
+
+/** Gesture-driven counterpart of the indeterminate loading indicator. */
+@Composable
+internal fun PullLoadingShape(progress: () -> Float) {
+    val morph = remember { Morph(RoundedPolygon.circle().normalized(), LoadingShapes.sequence.first()) }
+    val path = remember { Path() }
+    val matrix = remember { Matrix() }
+    val color = MaterialTheme.colorScheme.onSecondaryContainer
+    Canvas(Modifier.size(36.dp)) {
+        val fraction = progress().coerceIn(0f, 1f)
+        path.reset()
+        writeCubics(path, morph.asCubics(fraction))
+        matrix.reset()
+        matrix.scale(size.width * .72f, size.height * .72f)
+        path.transform(matrix)
+        path.translate(center - path.getBounds().center)
+        rotate(-progress() * 180f) { drawPath(path, color) }
+    }
 }
 
 /** Значок в «печенье», форма медленно вращается (содержимое остаётся на месте). */
@@ -305,7 +318,8 @@ fun VpnConnectSpinner(
 
 /** Точка статуса: при подключении морфится в пятиугольник. */
 @Composable
-fun StatusShape(connected: Boolean, working: Boolean, modifier: Modifier = Modifier) {    val scheme = MaterialTheme.colorScheme
+fun StatusShape(connected: Boolean, working: Boolean, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
     val color by animateColorAsState(
         when {
             connected -> scheme.primary

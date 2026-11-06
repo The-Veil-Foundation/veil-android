@@ -1,78 +1,50 @@
 package dev.local.veil.ui
 
-import androidx.compose.material3.AlertDialog
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.TopAppBarState
-import androidx.compose.material3.rememberTopAppBarState
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.window.Dialog
-import androidx.compose.foundation.layout.Row
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -84,18 +56,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.delay
-import dev.local.veil.platform.PlatformBackHandler
-import dev.local.veil.platform.VpnPhase
-import dev.local.veil.platform.isLowRamDevice
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import dev.local.veil.platform.AppContainer
+import dev.local.veil.platform.PlatformBackHandler
+import dev.local.veil.platform.VpnPhase
+import dev.local.veil.platform.isLowRamDevice
+import kotlinx.coroutines.delay
 
 private enum class Tab {
     SERVERS,
@@ -160,7 +136,6 @@ fun App(container: AppContainer) {
         val reduceMotion = isLowRamDevice()
         CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
 
-
         LaunchedEffect(Unit) {
             delay(900)
             state.autoConnectOnLaunch(status)
@@ -204,7 +179,6 @@ fun App(container: AppContainer) {
                 state.showBulletin(message, BulletinKind.ERROR)
             }
         }
-        val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
         LaunchedEffect(Unit) {
             state.ensureGeo()
@@ -254,12 +228,6 @@ fun App(container: AppContainer) {
                     .coerceAtLeast(0)
                     .toDp()
             }
-            // Буллетин мягко съезжает, когда нижняя навигация прячется.
-            val bulletinBottom by animateDpAsState(
-                targetValue = if (state.isTv || landscape || showSplit || showLogs || showReceive) 24.dp else 104.dp,
-                animationSpec = tween(180),
-                label = "bulletin-pad",
-            )
             Scaffold(
             modifier = Modifier
                 .fillMaxSize()
@@ -269,13 +237,11 @@ fun App(container: AppContainer) {
                         landscape -> Modifier.padding(start = 78.dp + cutoutStart, end = cutoutEnd)
                         else -> Modifier
                     },
-                )
-                .then(
-                    // Верхняя панель не сворачивается: подключение уезжает вместе
-                    // со списком, а сверху его заменяет компактная полоса.
-                    Modifier,
                 ),
             containerColor = MaterialTheme.colorScheme.background,
+            snackbarHost = {
+                BulletinHost(bulletin = state.bulletin, onDismiss = state::dismissBulletin)
+            },
             topBar = {
               // Панели сменяют друг друга коротким слайдом без отскока.
               AnimatedContent(
@@ -507,13 +473,6 @@ fun App(container: AppContainer) {
                 )
             }
 
-            BulletinHost(
-                bulletin = state.bulletin,
-                onDismiss = state::dismissBulletin,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(start = 16.dp, end = 16.dp, bottom = bulletinBottom),
-            )
         }
 
         // QR приставки или «Открыть в Veil» на её странице: спрашиваем, что
@@ -573,68 +532,32 @@ fun App(container: AppContainer) {
     }
 }
 
-/** Нижняя навигация: Solar-иконки, выбранная чуть крупнее — без подпрыгивания. */
+/** Standard M3 navigation: active indicator behind the icon, label below it. */
 @Composable
 private fun VeilNavigationBar(current: Tab, tabs: List<Tab>, onSelect: (Tab) -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    val pill = RoundedCornerShape(30.dp)
-    // M3 Expressive: плавающая тональная панель вместо приклеенной к краю.
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-    ) {
-        NavigationBar(
-            containerColor = scheme.surfaceContainerHigh,
-            tonalElevation = 2.dp,
-            windowInsets = WindowInsets(0),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(78.dp)
-                .shadow(10.dp, pill, clip = false)
-                .clip(pill),
-        ) {
-            val shown = if (current in tabs) current else Tab.SETTINGS
-            tabs.forEach { entry ->
-                val selected = shown == entry
-                NavigationBarItem(
-                    selected = selected,
-                    onClick = { onSelect(entry) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = scheme.onSecondaryContainer,
-                        selectedTextColor = scheme.onSurface,
-                        indicatorColor = scheme.secondaryContainer,
-                        unselectedIconColor = scheme.onSurfaceVariant,
-                        unselectedTextColor = scheme.onSurfaceVariant,
-                    ),
-                    icon = { TabIcon(entry = entry, selected = selected) },
-                    label = {
-                        Text(
-                            text = when (entry) {
-                                Tab.SERVERS -> tr("Серверы", "Servers")
-                                Tab.SUBS -> tr("Источники", "Sources")
-                                Tab.ROUTING -> tr("Маршрут", "Routing")
-                                Tab.SETTINGS -> tr("Настройки", "Settings")
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        )
-                    },
-                )
-            }
+    val shown = if (current in tabs) current else Tab.SETTINGS
+    NavigationBar {
+        tabs.forEach { entry ->
+            NavigationBarItem(
+                selected = shown == entry,
+                onClick = { onSelect(entry) },
+                icon = { TabIcon(entry) },
+                label = { Text(tabLabel(entry)) },
+            )
         }
     }
 }
 
 @Composable
-private fun TabIcon(entry: Tab, selected: Boolean) {
-    // M3 Expressive: выбор вкладки — быстрая spatial-пружина, без «прыжка».
-    val pop by animateFloatAsState(
-        targetValue = if (selected) 1.14f else 1f,
-        animationSpec = VeilMotion.fastSpatial,
-        label = "nav-pop",
-    )
+private fun tabLabel(entry: Tab): String = when (entry) {
+    Tab.SERVERS -> tr("Серверы", "Servers")
+    Tab.SUBS -> tr("Источники", "Sources")
+    Tab.ROUTING -> tr("Маршрут", "Routing")
+    Tab.SETTINGS -> tr("Настройки", "Settings")
+}
+
+@Composable
+private fun TabIcon(entry: Tab) {
     AppIcon(
         icon = when (entry) {
             Tab.SERVERS -> AppIcons.Server
@@ -642,12 +565,9 @@ private fun TabIcon(entry: Tab, selected: Boolean) {
             Tab.ROUTING -> AppIcons.Routing
             Tab.SETTINGS -> AppIcons.Settings
         },
-        modifier = Modifier
-            .size(24.dp)
-            .graphicsLayer { scaleX = pop; scaleY = pop },
+        modifier = Modifier.size(24.dp),
     )
 }
-
 
 /** Боковая навигация для телевизора: пульт ходит по ней без «прыжков» вниз. */
 @Composable
@@ -687,7 +607,7 @@ private fun TvNavigationRail(
                 NavigationRailItem(
                     selected = shown == entry,
                     onClick = { onSelect(entry) },
-                    icon = { TabIcon(entry = entry, selected = shown == entry) },
+                    icon = { TabIcon(entry) },
                     label = {
                         Text(
                             text = when (entry) {

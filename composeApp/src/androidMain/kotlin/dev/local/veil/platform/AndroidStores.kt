@@ -18,6 +18,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 
 class AndroidSettingsStore(context: Context) : SettingsStore {
+    private val appContext = context.applicationContext
     private val prefs = context.getSharedPreferences("veil", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -26,7 +27,9 @@ class AndroidSettingsStore(context: Context) : SettingsStore {
     }.getOrNull() ?: AppSettings()
 
     override fun save(settings: AppSettings) {
+        val notificationChanged = load().liveNotification != settings.liveNotification
         prefs.edit().putString(KEY, json.encodeToString(AppSettings.serializer(), settings)).apply()
+        if (notificationChanged) VeilVpnService.updateNotification(appContext, settings.liveNotification)
     }
 
     private companion object {

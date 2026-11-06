@@ -1,15 +1,12 @@
 package dev.local.veil.ui
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -79,14 +76,3 @@ internal fun Modifier.staggerIn(seen: MutableSet<Any>, key: Any, index: Int): Mo
         scaleY = s
     }
 }
-
-internal class StaggerScope {
-    val seen = mutableSetOf<Any>()
-    var next = 0
-}
-
-internal val LocalStagger = compositionLocalOf<StaggerScope?> { null }
-
-/** Появление по порядку композиции: отключено — экран настроек без анимации. */
-@Composable
-internal fun Modifier.staggerInScoped(): Modifier = this
