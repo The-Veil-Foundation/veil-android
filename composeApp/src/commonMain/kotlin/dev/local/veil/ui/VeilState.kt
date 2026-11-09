@@ -152,6 +152,39 @@ class VeilState(
         private set
     var geoBusy by mutableStateOf(false)
         private set
+    var geoProgress by mutableStateOf<dev.local.veil.platform.GeoDownloadProgress?>(null)
+        private set
+    var geoError by mutableStateOf<String?>(null)
+        private set
+    var routingError by mutableStateOf<String?>(null)
+        private set
+    private var routingApplyJob: Job? = null
+    private var routingApplyPending = false
+
+    /** Apply the latest saved rules, including freshly downloaded lists. */
+    fun applyRouting() {
+        routingApplyPending = true
+        if (routingApplyJob?.isActive == true) return
+        routingApplyJob = scope.launch {
+            while (routingApplyPending) {
+                routingApplyPending = false
+                kotlinx.coroutines.delay(400)
+                switchJob?.join()
+                connectJob?.join()
+                // Service reload is asynchronous; don't drop edits made while it starts.
+                kotlinx.coroutines.withTimeoutOrNull(30_000) {
+                    while (container.vpn.status.value.isBusy) kotlinx.coroutines.delay(100)
+                }
+                if (!container.vpn.status.value.isConnected) return@launch
+                val server = selected ?: return@launch
+                routingError = null
+                container.vpn.reconnect(server, tunnelOptions()).onFailure {
+                    routingError = it.message ?: tr("Не удалось применить правила", "Could not apply rules")
+                    showBulletin(routingError!!, BulletinKind.ERROR)
+                }
+            }
+        }
+    }
     var appsLoading by mutableStateOf(false)
         private set
 
@@ -260,10 +293,12 @@ class VeilState(
     }
 
     fun saveSettings(next: AppSettings) {
+        val routingChanged = settings.routingFingerprint != next.routingFingerprint
         settings = next
         container.settings.save(next)
         container.subscriptions.userAgent = next.userAgent
         ensureGeo()
+        if (routingChanged) applyRouting()
     }
 
     /* ---------------- маршрутизация, группы, заметки ---------------- */
@@ -348,11 +383,10 @@ class VeilState(
     }
 
     /** Правила, в которые разворачиваются выбранные списки. */
-    fun communityRules(): List<RoutingRule> = settings.communityLists.mapNotNull { id ->
-        val list = CommunityCatalog.list(id) ?: return@mapNotNull null
-        val cache = communityCache[id] ?: return@mapNotNull null
-        if (cache.isEmpty) return@mapNotNull null
-        RoutingRule(
+    fun communityRules(): List<RoutingRule> = settings.communityLists.flatMap { id ->
+        val list = CommunityCatalog.list(id) ?: return@flatMap emptyList()
+        val cache = communityCache[id] ?: return@flatMap emptyList()
+        dev.local.veil.core.communityRoutingRules(
             id = "community:$id",
             name = list.title(communityLanguage),
             target = settings.communityListTarget,
@@ -368,6 +402,7 @@ class VeilState(
         communityError = null
         communityBusy = todo.toSet()
         scope.launch {
+            try {
             for (id in todo) {
                 val list = CommunityCatalog.list(id) ?: continue
                 val domainsText = fetchText(CommunityCatalog.rawUrl(list.domainPath))
@@ -376,14 +411,22 @@ class VeilState(
                     continue
                 }
                 val domains = parseCommunityDomains(domainsText)
+                var missingIpList = false
                 val ips = buildList {
                     list.ipv4Path?.let { path ->
-                        fetchText(CommunityCatalog.rawUrl(path))?.let { addAll(parseCommunityCidrs(it)) }
+                        val text = fetchText(CommunityCatalog.rawUrl(path))
+                        if (text == null) missingIpList = true else addAll(parseCommunityCidrs(text))
                     }
                     list.ipv6Path?.let { path ->
-                        fetchText(CommunityCatalog.rawUrl(path))?.let { addAll(parseCommunityCidrs(it)) }
+                        val text = fetchText(CommunityCatalog.rawUrl(path))
+                        if (text == null) missingIpList = true else addAll(parseCommunityCidrs(text))
                     }
                 }.distinct()
+                if (missingIpList) {
+                    communityError = tr("Не удалось скачать IP-часть списка. Сохранена предыдущая версия.",
+                        "Could not download the IP list. The previous version was kept.")
+                    continue
+                }
                 if (domains.isEmpty() && ips.isEmpty()) {
                     communityError = tr(
                         "Список «${list.title(communityLanguage)}» пришёл пустым",
@@ -397,7 +440,8 @@ class VeilState(
                 writeTextFile("$communityDirectory/$id.time", entry.updated.toString())
                 communityCache = communityCache + (id to entry)
             }
-            communityBusy = emptySet()
+            applyRouting()
+            } finally { communityBusy = emptySet() }
         }
     }
 
@@ -417,6 +461,7 @@ class VeilState(
             deleteFile("$communityDirectory/${list.id}.time")
         }
         communityCache = emptyMap()
+        applyRouting()
         showBulletin(
             tr("Кэш списков очищен", "List cache cleared"),
             BulletinKind.SUCCESS,
@@ -425,7 +470,9 @@ class VeilState(
 
     private suspend fun fetchText(url: String): String? = withContext(Dispatchers.IO) {
         // Готовые списки лежат на GitHub: HWID туда слать незачем.
-        runCatching { container.subscriptions.fetch(url, hwid = null).getOrThrow().body }.getOrNull()
+        try { container.subscriptions.fetch(url, hwid = null).getOrThrow().body }
+        catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+        catch (_: Exception) { null }
     }
 
     private fun parseCommunityDomains(text: String): List<String> = text.lineSequence()
@@ -462,10 +509,7 @@ class VeilState(
         saveAnnotation(serverId, annotationFor(serverId).copy(hidden = hidden))
     }
 
-    /**
-     * Тихо скачивает geo-базу, если настройкам она нужна, а её нет. Кнопки
-     * «Скачать базу» больше нет, поэтому сообщаем только об ошибке.
-     */
+    /** Auto-download missing databases; the routing screen also offers retry/update. */
     fun ensureGeo() {
         if (settings.needsGeoAssets && !geoAvailable && !geoBusy && !geoAutoFailed) downloadGeo()
     }
@@ -477,19 +521,31 @@ class VeilState(
     private var geoAutoFailed = false
 
     /** Скачивает базу правил выбранного источника. */
-    private fun downloadGeo() {
+    fun downloadGeo() {
         if (geoBusy) return
         geoBusy = true
+        geoError = null
+        geoProgress = null
+        geoAutoFailed = false
+        val requested = settings
         scope.launch {
-            container.geo.download(settings.geoSource, settings.customGeoipUrl, settings.customGeositeUrl)
+            try {
+            container.geo.downloadWithProgress(requested.geoSource, requested.customGeoipUrl, requested.customGeositeUrl) { progress ->
+                scope.launch { geoProgress = progress }
+            }
                 .onSuccess {
-                    geoAvailable = true
+                    geoAvailable = container.geo.hasAssets
+                    applyRouting()
                 }
                 .onFailure { error ->
                     geoAutoFailed = true
-                    showBulletin(error.message ?: tr("Не удалось скачать базу правил", "Could not download the rule database"), BulletinKind.ERROR)
+                    geoError = error.message ?: tr("Не удалось скачать базу правил", "Could not download the rule database")
+                    showBulletin(geoError!!, BulletinKind.ERROR)
                 }
-            geoBusy = false
+            } finally {
+                geoBusy = false
+                geoAvailable = container.geo.hasAssets
+            }
         }
     }
 
@@ -1034,7 +1090,7 @@ class VeilState(
     fun toggleTunnel(status: VpnStatus) {
         when (status.phase) {
             VpnPhase.CONNECTED -> scope.launch { container.vpn.disconnect() }
-            VpnPhase.PAUSED -> scope.launch { container.vpn.resume() }
+            VpnPhase.PAUSED -> connect()
             VpnPhase.CONNECTING -> Unit
             VpnPhase.DISCONNECTED, VpnPhase.ERROR -> connect()
         }

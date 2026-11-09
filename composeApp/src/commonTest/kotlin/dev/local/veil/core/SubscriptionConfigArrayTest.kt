@@ -69,6 +69,28 @@ class SubscriptionConfigArrayTest {
     }
 
     @Test
+    fun userRulesAreAppliedToImportedConfigs() {
+        val options = TunnelOptions(rules = listOf(
+            RoutingRule(target = RuleTarget.Direct, domains = listOf("domain:example.org")),
+            RoutingRule(target = RuleTarget.Proxy, domains = listOf("domain:example.net")),
+        ))
+        val result = XrayConfig.build(node(), options)
+        val routing = result["routing"]!!.jsonObject
+        val rules = routing["rules"]!!.jsonArray
+        assertEquals("domain:example.org", rules[0].jsonObject["domain"]!!.jsonArray[0].jsonPrimitive.content)
+        val directTag = rules[0].jsonObject["outboundTag"]!!.jsonPrimitive.content
+        assertTrue(result["outbounds"]!!.jsonArray.any {
+            it.jsonObject["tag"]?.jsonPrimitive?.content == directTag &&
+                it.jsonObject["protocol"]?.jsonPrimitive?.content == "freedom"
+        })
+        assertEquals("auto", rules[1].jsonObject["balancerTag"]!!.jsonPrimitive.content)
+        assertEquals("auto", rules.last().jsonObject["balancerTag"]!!.jsonPrimitive.content)
+        assertEquals(2, result["outbounds"]!!.jsonArray.count {
+            it.jsonObject["tag"]?.jsonPrimitive?.content in listOf("A-REALITY", "A-TLS")
+        })
+    }
+
+    @Test
     fun `config array becomes one balanced node`() {
         val node = node()
         assertEquals("Тест · Эстония", node.name)

@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -96,7 +97,7 @@ object XrayConfig {
         // подменяя только inbounds — на Android пакеты приходят из нашего TUN.
         cfg.rawConfigJson?.let { raw ->
             val doc = runCatching { Json.parseToJsonElement(raw) as JsonObject }.getOrNull()
-            if (doc != null) return patchRaw(doc, options, inbound)
+            if (doc != null) return patchRaw(doc, options, inbound, cfg)
         }
 
         val dnsSettings = options.dnsSettings?.takeIf { it.enabled }
@@ -246,6 +247,7 @@ object XrayConfig {
         doc: JsonObject,
         options: TunnelOptions,
         inbound: XrayInbound,
+        cfg: ProxyConfig,
     ): JsonObject {
         val mutable = doc.toMutableMap()
         mutable["log"] = logJson(options)
@@ -281,6 +283,57 @@ object XrayConfig {
         // когда все замеры временно упали. Подставляем живой выход.
         (mutable["routing"] as? JsonObject)?.let { routing ->
             mutable["routing"] = withBalancerFallback(routing, mutable["outbounds"] as? JsonArray)
+        }
+        if (options.rules.any { it.enabled && it.hasMatcher } || options.dnsSettings?.enabled == true) {
+            val generated = build(cfg.copy(rawConfigJson = null), options, inbound)
+            val originalOutbounds = (mutable["outbounds"] as? JsonArray).orEmpty()
+            val originalRouting = mutable["routing"] as? JsonObject ?: JsonObject(emptyMap())
+            val originalRules = (originalRouting["rules"] as? JsonArray).orEmpty()
+            var prefix = "veil:"
+            val occupied = originalOutbounds.mapNotNull { (it as? JsonObject)?.get("tag")?.jsonPrimitive?.content }
+            while (occupied.any { it.startsWith(prefix) }) prefix += "veil:"
+            fun namespaced(element: JsonElement, key: String = ""): JsonElement = when (element) {
+                is JsonObject -> JsonObject(element.mapValues { (k, v) -> namespaced(v, k) })
+                is JsonArray -> JsonArray(element.map { namespaced(it, key) })
+                is JsonPrimitive -> if (element.isString && key in setOf("tag", "outboundTag", "balancerTag", "fallbackTag", "selector", "subjectSelector"))
+                    JsonPrimitive(prefix + element.content) else element
+                else -> element
+            }
+            val added = namespaced(generated) as JsonObject
+            val addedRouting = added["routing"] as JsonObject
+            // Preserve the provider's normal proxy/balancer for explicit Proxy rules.
+            val defaultRoute = originalRules.filterIsInstance<JsonObject>().lastOrNull {
+                ("outboundTag" in it || "balancerTag" in it) &&
+                    it.keys.all { key -> key in setOf("type", "network", "outboundTag", "balancerTag") }
+            }
+            val addedRules = (addedRouting["rules"] as JsonArray).dropLast(1).filterNot {
+                (it as? JsonObject)?.get("outboundTag")?.jsonPrimitive?.content == prefix + TAG_DNS_OUT &&
+                    options.dnsSettings?.enabled != true
+            }.map { element ->
+                val rule = element as JsonObject
+                if (rule["outboundTag"]?.jsonPrimitive?.content == prefix + TAG_PROXY && defaultRoute != null) {
+                    JsonObject(rule.toMutableMap().apply {
+                        remove("outboundTag")
+                        defaultRoute["outboundTag"]?.let { put("outboundTag", it) }
+                        defaultRoute["balancerTag"]?.let { put("balancerTag", it) }
+                    })
+                } else rule
+            }
+            mutable["outbounds"] = JsonArray(originalOutbounds + (added["outbounds"] as JsonArray))
+            mutable["routing"] = JsonObject(originalRouting.toMutableMap().apply {
+                put("rules", JsonArray(addedRules + originalRules))
+                val balancers = (originalRouting["balancers"] as? JsonArray).orEmpty() +
+                    (addedRouting["balancers"] as? JsonArray).orEmpty()
+                if (balancers.isNotEmpty()) put("balancers", JsonArray(balancers))
+            })
+            (added["observatory"] as? JsonObject)?.let { extra ->
+                val existing = mutable["observatory"] as? JsonObject ?: extra
+                mutable["observatory"] = JsonObject(existing.toMutableMap().apply {
+                    put("subjectSelector", JsonArray(((existing["subjectSelector"] as? JsonArray).orEmpty() +
+                        (extra["subjectSelector"] as? JsonArray).orEmpty()).distinct()))
+                })
+            }
+            if (options.dnsSettings?.enabled == true) generated["dns"]?.let { mutable["dns"] = it }
         }
         return JsonObject(mutable)
     }

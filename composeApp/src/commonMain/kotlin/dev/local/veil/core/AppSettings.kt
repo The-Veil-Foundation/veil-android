@@ -196,12 +196,12 @@ data class AppSettings(
 
     /**
      * Нужна ли geo-база (geoip.dat/geosite.dat): блокировка рекламы или своё
-     * правило с `geosite:`/`geoip:`. Кнопки скачивания больше нет, поэтому
-     * база подтягивается сама, когда что-то из этого включено.
+     * включённое правило с `geosite:`/`geoip:`.
      */
     val needsGeoAssets: Boolean
         get() = blockAds || routingPreset.needsGeoAssets || customRules.any { rule ->
-            rule.domains.any { it.startsWith("geosite:") } || rule.ips.any { it.startsWith("geoip:") }
+            rule.enabled && (rule.domains.any { it.startsWith("geosite:", ignoreCase = true) } ||
+                rule.ips.any { it.startsWith("geoip:", ignoreCase = true) })
         }
 
     /** User-Agent, который реально уходит в запросах подписки. */

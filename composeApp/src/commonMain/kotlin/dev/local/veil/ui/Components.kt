@@ -37,7 +37,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.font.FontWeight
@@ -101,6 +105,36 @@ private fun rightShieldPath(): androidx.compose.ui.graphics.Path =
         lineTo(86.125f, 19.875f)
         close()
     }
+
+/** Asymmetric brand artwork with a quiet area reserved for the card's text. */
+private fun Modifier.shieldPattern(color: Color, container: Color): Modifier = drawWithCache {
+    val left = leftShieldPath()
+    val right = rightShieldPath()
+    val artworkSize = minOf(size.width * .43f, 156.dp.toPx())
+    val textScrim = Brush.horizontalGradient(
+        0f to container,
+        .48f to container,
+        .80f to container.copy(alpha = 0f),
+    )
+    onDrawBehind {
+        fun shield(x: Float, y: Float, scaleFactor: Float, angle: Float, alpha: Float) {
+            translate(size.width * x, size.height * y) {
+                rotate(angle, pivot = Offset.Zero) {
+                    scale(artworkSize * scaleFactor / 106f, pivot = Offset.Zero) {
+                        translate(-66.25f, -67.575f) {
+                            drawPath(left, color.copy(alpha = alpha))
+                            drawPath(right, color.copy(alpha = alpha))
+                        }
+                    }
+                }
+            }
+        }
+        shield(.96f, .19f, 1f, 18f, .12f)
+        shield(.72f, .43f, .58f, -12f, .08f)
+        shield(.98f, .62f, .40f, 18f, .10f)
+        drawRect(textScrim)
+    }
+}
 
 /** Крупная статус-карточка: состояние, трафик, таймер, кнопка. */
 @Composable
@@ -172,7 +206,7 @@ fun StatusCard(
         shadowElevation = 0.dp,
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Column(Modifier.shieldPattern(content, container).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -190,19 +224,7 @@ fun StatusCard(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
-                Surface(
-                    shape = rememberMorphShape(connected, MaterialShapePresets.Cookie, turn = .25f),
-                    color = if (status.phase == VpnPhase.ERROR) scheme.error else scheme.primary,
-                    contentColor = if (status.phase == VpnPhase.ERROR) scheme.onError else scheme.onPrimary,
-                ) {
-                    Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
-                        if (working) ExpressiveLoader(diameter = 32.dp, color = scheme.onPrimary)
-                        else AppIcon(
-                            if (connected) AppIcons.Shield else if (status.phase == VpnPhase.ERROR) AppIcons.Danger else AppIcons.Power,
-                            modifier = Modifier.size(28.dp),
-                        )
-                    }
-                }
+                if (working) ExpressiveLoader(diameter = 28.dp, color = content)
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -302,19 +324,27 @@ fun CompactStatusBar(
         0
     }
 
+    val scheme = MaterialTheme.colorScheme
+    val reduceMotion = LocalReduceMotion.current || LocalTvMode.current
     val container by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.errorContainer
+            connected -> scheme.primaryContainer
+            else -> scheme.surfaceContainerHigh
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(180),
         label = "compact-bg",
     )
     val content by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.onErrorContainer
+            connected -> scheme.onPrimaryContainer
+            else -> scheme.onSurface
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(180),
         label = "compact-fg",
     )
-    val shape = Md3Shapes.card
+    val shape = MaterialTheme.shapes.extraLarge
 
     Surface(
         color = container,
@@ -324,16 +354,16 @@ fun CompactStatusBar(
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
-            Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Вместо точки — форма: перетекает из круга в «печенье», когда туннель поднят.
-            StatusShape(connected = connected, working = working)
+            if (working) ExpressiveLoader(diameter = 36.dp, color = content)
+            else VeilMark(size = 36.dp, background = content.copy(alpha = .10f), foreground = content)
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -354,11 +384,13 @@ fun CompactStatusBar(
                     },
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (connected) {
                 Text(
-                    text = formatSpeed(status.downlinkSpeed),
+                    text = "↓ ${formatSpeed(status.downlinkSpeed)}",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(end = 10.dp),
@@ -368,7 +400,7 @@ fun CompactStatusBar(
                 onClick = onToggle,
                 enabled = !working,
                 shape = CircleShape,
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(48.dp),
             ) {
                 if (working) {
                     CircularProgressIndicator(
@@ -379,7 +411,11 @@ fun CompactStatusBar(
                 } else {
                     AppIcon(
                         icon = if (connected) AppIcons.Shield else AppIcons.Power,
-                        contentDescription = if (connected) tr("Отключить", "Disconnect") else tr("Подключить", "Connect"),
+                        contentDescription = when {
+                            connected -> tr("Отключить", "Disconnect")
+                            status.phase == VpnPhase.PAUSED -> tr("Возобновить", "Resume")
+                            else -> tr("Подключить", "Connect")
+                        },
                         modifier = Modifier.size(20.dp),
                     )
                 }

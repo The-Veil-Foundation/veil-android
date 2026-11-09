@@ -322,14 +322,14 @@ fun ServersScreen(
                 serverList(Modifier.fillMaxSize(), true)
                 androidx.compose.animation.AnimatedVisibility(
                     visible = compact,
-                    enter = androidx.compose.animation.slideInVertically(tween(180)) { -it } + fadeIn(tween(150)),
-                    exit = androidx.compose.animation.slideOutVertically(tween(150)) { -it } + fadeOut(tween(120)),
-                    // Подложка цвета фона: строки списка не просвечивают над полосой.
+                    enter = if (reduceMotion) androidx.compose.animation.EnterTransition.None
+                        else slideInVertically(tween(180)) { -it } + fadeIn(tween(150)),
+                    exit = if (reduceMotion) androidx.compose.animation.ExitTransition.None
+                        else slideOutVertically(tween(150)) { -it } + fadeOut(tween(120)),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.background)
-                        .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                 ) {
                     CompactStatusBar(
                         status = status,

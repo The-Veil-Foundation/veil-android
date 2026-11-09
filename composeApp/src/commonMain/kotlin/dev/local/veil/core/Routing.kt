@@ -82,6 +82,12 @@ enum class RuleDirection { DESTINATION, SOURCE }
  * `regexp:`, `geosite:`, `geoip:`) — так говорят ссылки, панели и остальные
  * клиенты. [MatcherSyntax] раскладывает их обратно для sing-box.
  */
+/** Domain and IP entries of a community list are alternatives, not an AND match. */
+fun communityRoutingRules(id: String, name: String, target: RuleTarget, domains: List<String>, ips: List<String>): List<RoutingRule> = buildList {
+    if (domains.isNotEmpty()) add(RoutingRule(id = "$id:domains", name = name, target = target, domains = domains))
+    if (ips.isNotEmpty()) add(RoutingRule(id = "$id:ips", name = name, target = target, ips = ips))
+}
+
 @Serializable
 data class RoutingRule(
     val id: String = newId(),

@@ -163,10 +163,22 @@ class AndroidVpnController(
         server: ProxyConfig,
         options: TunnelOptions,
         engine: CoreEngine,
-    ): String = when (engine) {
+    ): String {
+        if (engine == CoreEngine.XRAY) {
+            val activeRules = options.rules.filter { it.enabled && it.hasMatcher }
+            require(activeRules.none { it.xrayRule() == null }) {
+                "В правилах есть условия, которые Xray не поддерживает. Уберите условия приложений, rule-set или инверсию."
+            }
+            require(options.geoAvailable || activeRules.none { rule ->
+                rule.domains.any { it.startsWith("geosite:", ignoreCase = true) && it != "geosite:private" } ||
+                    rule.ips.any { it.startsWith("geoip:", ignoreCase = true) && it != "geoip:private" }
+            }) { "Геобазы ещё не загружены. Откройте «Маршрут» → «Геобазы» и завершите загрузку." }
+        }
+        return when (engine) {
         // Резолвер понимает только форму Xray; sing-box пока получает конфиг как есть.
         CoreEngine.SING_BOX -> SingboxConfig.build(server, options).toString()
         else -> resolveEndpoints(XrayConfig.json(server, options))
+    }
     }
 
     private fun prepareLog(engine: CoreEngine, path: String) {

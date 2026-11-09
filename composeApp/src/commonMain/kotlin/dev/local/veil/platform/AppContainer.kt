@@ -128,11 +128,15 @@ interface SubscriptionFetcher {
 }
 
 /** geoip.dat / geosite.dat для правил geosite:/geoip:. */
+data class GeoDownloadProgress(val file: String, val bytes: Long, val total: Long?)
+
 interface GeoService {
     val directory: String
     val hasAssets: Boolean
     /** [customGeoip]/[customGeosite] — адреса для [GeoAssetSource.CUSTOM]. */
     suspend fun download(source: GeoAssetSource, customGeoip: String = "", customGeosite: String = ""): Result<Unit>
+    suspend fun downloadWithProgress(source: GeoAssetSource, customGeoip: String, customGeosite: String,
+        onProgress: (GeoDownloadProgress) -> Unit): Result<Unit> = download(source, customGeoip, customGeosite)
 }
 
 /** Доступ к логам ядра из интерфейса. */

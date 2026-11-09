@@ -146,6 +146,52 @@ private fun RoutingHome(
         CommunityFeature(state = state, onOpen = { onOpen(RoutingPage.COMMUNITY) })
 
         SettingsGroup(
+            title = tr("Геобазы", "Geo databases"),
+            icon = AppIcons.Global,
+            rows = listOf({
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(settings.geoSource.title, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        when {
+                            state.geoBusy -> tr("Загружаем геобазы…", "Downloading geo databases…")
+                            state.geoError != null -> state.geoError!!
+                            state.geoAvailable -> tr("Базы установлены", "Databases installed")
+                            else -> tr("Базы не загружены", "Databases not downloaded")
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (state.geoBusy) {
+                        val progress = state.geoProgress
+                        Text(progress?.let { "${it.file} · ${formatBytes(it.bytes)}" } ?: tr("Соединение…", "Connecting…"))
+                        val total = progress?.total
+                        if (progress != null && total != null) {
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { (progress.bytes.toFloat() / total).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                    Text(
+                        tr("GeoIP и GeoSite для геоправил Xray. Изменения применяются к активному VPN автоматически.",
+                            "GeoIP and GeoSite for Xray geo rules. Changes are applied to the active VPN automatically."),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = state::downloadGeo, enabled = !state.geoBusy) {
+                        Text(when {
+                            state.geoError != null -> tr("Повторить", "Retry")
+                            state.geoAvailable -> tr("Обновить базы", "Update databases")
+                            else -> tr("Скачать базы", "Download databases")
+                        })
+                    }
+                    state.routingError?.let { error ->
+                        Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = state::applyRouting) { Text(tr("Применить правила снова", "Retry applying rules")) }
+                    }
+                }
+            }),
+        )
+
+        SettingsGroup(
             title = tr("Правила", "Rules"),
             icon = AppIcons.Filter,
             rows = listOf(
