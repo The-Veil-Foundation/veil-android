@@ -7,13 +7,6 @@ import kotlinx.serialization.json.jsonPrimitive
 
 class LinkParseException(message: String) : Exception(message)
 
-/**
- * Разбор share-ссылок в [ProxyConfig].
- *
- * Порт `LinkParser.swift` из veil-macos: те же формы ссылок, те же допущения
- * (однократное percent-декодирование credential, trojan по умолчанию TLS,
- * `sni` наследуется от `host`).
- */
 object LinkParser {
 
     fun parse(raw: String): ProxyConfig {
@@ -37,11 +30,8 @@ object LinkParser {
         }
     }
 
-    /** Разбирает список ссылок построчно, молча пропуская битые. */
     fun parseMany(text: String): List<ProxyConfig> =
         text.lineSequence().mapNotNull { runCatching { parse(it) }.getOrNull() }.toList()
-
-    /* ---------------- vless ---------------- */
 
     private fun parseVless(line: String): ProxyConfig {
         val uri = parseRawUri(line)
@@ -58,8 +48,6 @@ object LinkParser {
             flow = q["flow"],
         ).let { applySecurity(applyTransport(it, q), q) }
     }
-
-    /* ---------------- vmess ---------------- */
 
     private fun parseVmess(line: String): ProxyConfig {
         val b64 = line.removePrefix("vmess://")
@@ -97,8 +85,6 @@ object LinkParser {
         )
     }
 
-    /* ---------------- trojan ---------------- */
-
     private fun parseTrojan(line: String): ProxyConfig {
         val uri = parseRawUri(line)
         val pwd = credential(uri.userInfo) ?: throw LinkParseException("Malformed link: $line")
@@ -112,12 +98,10 @@ object LinkParser {
             password = pwd,
         )
         cfg = applyTransport(cfg, q)
-        // Trojan по умолчанию TLS, если ссылка не сказала иначе.
+
         if (q["security"] == null && q["tls"] == null) cfg = cfg.copy(security = StreamSecurity.TLS)
         return applySecurity(cfg, q)
     }
-
-    /* ---------------- shadowsocks ---------------- */
 
     private fun parseShadowsocks(line: String): ProxyConfig {
         val uri = runCatching { parseRawUri(line) }.getOrNull()
@@ -134,7 +118,7 @@ object LinkParser {
 
         val at = body.indexOf('@')
         if (at >= 0) {
-            // SIP002
+
             val userInfo = body.substring(0, at)
             val hostPart = body.substring(at + 1)
             val decoded = runCatching { base64Decode(userInfo) }.getOrNull() ?: percentDecode(userInfo)
@@ -147,7 +131,7 @@ object LinkParser {
             host = hp.first
             port = hp.second
         } else {
-            // Legacy base64(method:password@host:port)
+
             val decoded = runCatching { base64Decode(body) }.getOrNull()
                 ?: throw LinkParseException("Malformed link: $line")
             val atIdx = decoded.lastIndexOf('@')
@@ -176,8 +160,6 @@ object LinkParser {
         )
     }
 
-    /* ---------------- hysteria2 (не поддерживается Xray) ---------------- */
-
     private fun parseHysteria2(line: String): ProxyConfig {
         val uri = parseRawUri(line)
         val q = uri.query
@@ -203,8 +185,6 @@ object LinkParser {
         )
     }
 
-    /* ---------------- tuic (не поддерживается Xray) ---------------- */
-
     private fun parseTuic(line: String): ProxyConfig {
         val uri = parseRawUri(line)
         val q = uri.query
@@ -228,8 +208,6 @@ object LinkParser {
         )
     }
 
-    /* ---------------- anytls (не поддерживается Xray) ---------------- */
-
     private fun parseAnyTls(line: String): ProxyConfig {
         val uri = parseRawUri(line)
         val q = uri.query
@@ -248,8 +226,6 @@ object LinkParser {
             fingerprint = q["fp"],
         )
     }
-
-    /* ---------------- wireguard ---------------- */
 
     private fun parseWireGuard(line: String): ProxyConfig {
         val uri = parseRawUri(line)
@@ -278,7 +254,6 @@ object LinkParser {
         )
     }
 
-    /** Разбор вставленного wg-quick `.conf`. */
     fun parseWireGuardConf(text: String, name: String? = null): ProxyConfig? {
         var privateKey: String? = null
         var addresses: List<String> = emptyList()
@@ -328,8 +303,6 @@ object LinkParser {
             mtu = mtu,
         )
     }
-
-    /* ---------------- helpers ---------------- */
 
     private fun splitList(value: String): List<String> =
         value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
@@ -385,19 +358,12 @@ object LinkParser {
         return out
     }
 
-    /** Credential из userinfo, декодируется ровно один раз; пустое → null. */
     private fun credential(percentEncoded: String?): String? {
         if (percentEncoded.isNullOrEmpty()) return null
         val decoded = percentDecode(percentEncoded)
         return decoded.ifEmpty { null }
     }
 
-    /* ---------------- happ:// (HappyVPN format) ---------------- */
-
-    /**
-     * happ:// формат: base64-encoded JSON, похожий на vmess://
-     * Пример: happ://eyJ2IjoyLCJwcyI6Im5vZGUxIiwiYWRkIjoiMS4yLjMuNCIsInBvcnQiOjQ0MywidHlwZSI6InZsZXNzIiwiaWQiOiJ1dWlkLWhlcmUiLCJuZXQiOiJ3cyIsInBhdGgiOiIvcGF0aCIsInRscyI6InRscyIsInNuaSI6ImV4YW1wbGUuY29tIn0=
-     */
     private fun parseHapp(line: String): ProxyConfig {
         val b64 = line.removePrefix("happ://")
         val json: JsonObject = runCatching {
@@ -442,12 +408,6 @@ object LinkParser {
         )
     }
 
-    /* ---------------- incy:// (Incyber format) ---------------- */
-
-    /**
-     * incy:// формат: base64-encoded JSON с расширенными полями
-     * Похож на happ://, но с дополнительными параметрами для XHTTP/REALITY
-     */
     private fun parseIncy(line: String): ProxyConfig {
         val b64 = line.removePrefix("incy://")
         val json: JsonObject = runCatching {

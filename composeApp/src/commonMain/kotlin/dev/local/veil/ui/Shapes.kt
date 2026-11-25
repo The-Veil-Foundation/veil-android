@@ -50,16 +50,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/*
- * Material 3 Expressive на официальной библиотеке graphics-shapes.
- * Формы — RoundedPolygon, морфинг — через Morph (списки кубиков Безье),
- * Переходы формы используют пружины, индикатор загрузки вращается непрерывно.
- */
-
-/**
- * Шкала форм M3 Expressive: крупные скругления для карточек и листов,
- * малые — для внутренних сегментов. Значения синхронизированы с темой.
- */
 object Md3Shapes {
     val xs = 8.dp
     val sm = 12.dp
@@ -76,7 +66,6 @@ object Md3Shapes {
     val pill = RoundedCornerShape(percent = 50)
 }
 
-/** Набор Expressive-форм (RoundedPolygon). */
 object MaterialShapePresets {
     val Circle = RoundedPolygon.circle(numVertices = 16)
     val SoftTriangle = RoundedPolygon(3, rounding = CornerRounding(0.4f))
@@ -89,11 +78,10 @@ object MaterialShapePresets {
     val SoftSquare = RoundedPolygon(4, rounding = CornerRounding(0.5f))
     val Burst = RoundedPolygon(12, rounding = CornerRounding(0.18f))
     val Diamond = RoundedPolygon(4, rounding = CornerRounding(0.25f)).also {
-        // Поворот на 45° задаётся при морфинге через CubicsShape.
+
     }
 }
 
-/** Записывает замкнутый контур из кубиков Безье в [path]. */
 private fun writeCubics(path: Path, cubics: List<Cubic>) {
     val first = cubics.firstOrNull() ?: return
     path.moveTo(first.anchor0X, first.anchor0Y)
@@ -103,10 +91,6 @@ private fun writeCubics(path: Path, cubics: List<Cubic>) {
     path.close()
 }
 
-/**
- * Compose [Shape] из списка кубиков: масштабирует единичный контур
- * (радиус 1, центр в 0,0) под заданный [size] и при желании поворачивает.
- */
 class CubicsShape(
     private val cubics: List<Cubic>,
     private val rotationDegrees: Float = 0f,
@@ -117,8 +101,7 @@ class CubicsShape(
         val s = min(size.width, size.height) / 2f
         if (s != 0f) {
             val matrix = Matrix()
-            // Порядок: масштаб → поворот → перенос (масштаб и поворот коммутируют,
-            // перенос применяется последним, чтобы его не исказили).
+
             matrix.resetToPivotedTransform(
                 pivotX = 0f,
                 pivotY = 0f,
@@ -134,9 +117,6 @@ class CubicsShape(
     }
 }
 
-/**
- * Переход из круга в [to] при [active], с учётом режима уменьшения анимаций.
- */
 @Composable
 fun rememberMorphShape(
     active: Boolean,
@@ -153,7 +133,6 @@ fun rememberMorphShape(
     return CubicsShape(morph.asCubics(t.coerceIn(0f, 1f)), rotationDegrees = t * turn * 60f)
 }
 
-/** Material loading sequence: seven silhouettes, spring morph and continuous rotation. */
 @Composable
 fun ExpressiveLoader(
     modifier: Modifier = Modifier,
@@ -167,7 +146,7 @@ fun ExpressiveLoader(
         return
     }
     val sequence = LoadingShapes.sequence
-    // Пары соседних форм для морфа (последняя → первая, цикл).
+
     val morphs = remember(sequence) {
         List(sequence.size) { i -> Morph(sequence[i], sequence[(i + 1) % sequence.size]) }
     }
@@ -176,7 +155,7 @@ fun ExpressiveLoader(
     var turn by remember { mutableIntStateOf(0) }
     val progress = remember { Animatable(0f) }
     val rotation = remember { Animatable(0f) }
-    // Переиспользуемый Path: без аллокации на каждом кадре.
+
     val path = remember { Path() }
 
     LaunchedEffect(Unit) {
@@ -202,13 +181,12 @@ fun ExpressiveLoader(
             .progressSemantics()
             .size(diameter)
             .drawWithCache {
-                // Пружина допускает перелёт, а морф ожидает [0, 1].
+
                 val t = progress.value.coerceIn(0f, 1f)
 
                 path.reset()
                 writeCubics(path, morphs[index].asCubics(t))
 
-                // Rotation accumulates independently of the seven-shape index.
                 val angle = 90f * (turn + progress.value) + rotation.value
                 val cx = this.size.width / 2f
                 val cy = this.size.height / 2f
@@ -229,7 +207,6 @@ fun ExpressiveLoader(
     ) {}
 }
 
-/** Gesture-driven counterpart of the indeterminate loading indicator. */
 @Composable
 internal fun PullLoadingShape(progress: () -> Float) {
     val morph = remember { Morph(RoundedPolygon.circle().normalized(), LoadingShapes.sequence.first()) }
@@ -248,7 +225,6 @@ internal fun PullLoadingShape(progress: () -> Float) {
     }
 }
 
-/** Значок в «печенье», форма медленно вращается (содержимое остаётся на месте). */
 @Composable
 fun CookieBadge(
     modifier: Modifier = Modifier,
@@ -302,11 +278,6 @@ fun CookieBadge(
 private fun cookiePathForBadge(): Path =
     Path().also { writeCubics(it, MaterialShapePresets.Cookie.cubics) }
 
-/**
- * Спиннер на экране подключения: прерывистый морфинг форм (треугольник →
- * сквиркл → пятиугольник → …) с резкими рывками поворота — имитация поиска и
- * инициализации VPN-сервера. Цвет по умолчанию — primary.
- */
 @Composable
 fun VpnConnectSpinner(
     modifier: Modifier = Modifier,
@@ -316,7 +287,6 @@ fun VpnConnectSpinner(
     ExpressiveLoader(modifier = modifier, diameter = diameter, color = color)
 }
 
-/** Точка статуса: при подключении морфится в пятиугольник. */
 @Composable
 fun StatusShape(connected: Boolean, working: Boolean, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme

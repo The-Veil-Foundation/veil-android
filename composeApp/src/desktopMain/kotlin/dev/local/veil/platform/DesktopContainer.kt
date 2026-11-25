@@ -53,7 +53,6 @@ class DesktopServerStore : ServerStore {
     }
 }
 
-/** Десктопное ядро пока не подключено — нужен sidecar-процесс xray. */
 class DesktopVpnController : VpnController {
     private val _status = MutableStateFlow(VpnStatus())
     override val status: StateFlow<VpnStatus> = _status.asStateFlow()
@@ -94,7 +93,6 @@ class DesktopSettingsStore : SettingsStore {
     }
 }
 
-/** На десктопе раздельного туннелирования по приложениям нет. */
 class DesktopPackageLister : PackageLister {
     override suspend fun installedApps(): List<AppEntry> = emptyList()
 }
@@ -109,7 +107,6 @@ class DesktopPinger : Pinger {
             }.getOrNull()
         }
 
-    /** isReachable шлёт ICMP, если у процесса есть права, иначе обращается к порту 7. */
     override suspend fun icmp(server: ProxyConfig, timeoutMs: Int): Int? =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
@@ -131,7 +128,6 @@ class DesktopLogProvider : LogProvider {
     }
 }
 
-/** На десктопе обновления не поддерживаются — только на Android. */
 class DesktopUpdateService : UpdateService {
     override val currentVersion: String = dev.local.veil.AppVersion.NAME
     override suspend fun latest(): Result<AppRelease?> =
@@ -157,8 +153,6 @@ class DesktopContainer : AppContainer {
     override val pinger: Pinger = DesktopPinger()
 }
 
-
-/** На десктопе geo-базы не используются: правила работают без них. */
 private class DesktopGeoService : GeoService {
     override val directory: String = ""
     override val hasAssets: Boolean = false

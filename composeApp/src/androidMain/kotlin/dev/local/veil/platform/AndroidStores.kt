@@ -50,8 +50,7 @@ class AndroidPackageLister(context: Context) : PackageLister {
         }
 
         apps.asSequence()
-            // только то, что пользователь может запустить
-            // Android TV: часть приложений запускается только через leanback-лончер
+
             .filter {
                 packageManager.getLaunchIntentForPackage(it.packageName) != null ||
                     packageManager.getLeanbackLaunchIntentForPackage(it.packageName) != null
@@ -86,10 +85,6 @@ class AndroidPinger : Pinger {
         }.getOrNull()
     }
 
-    /**
-     * Системный ping без root. Берём лучший из двух ответов, как делает
-     * обычный ping. -w страхует от зависания: утилита завершится сама.
-     */
     override suspend fun icmp(server: ProxyConfig, timeoutMs: Int): Int? = withContext(Dispatchers.IO) {
         var process: Process? = null
         runCatching {
@@ -109,7 +104,6 @@ class AndroidPinger : Pinger {
     }
 }
 
-/** Подписки в том же SharedPreferences, что и серверы. */
 class AndroidSubscriptionStore(context: Context) {
     private val prefs = context.getSharedPreferences("veil", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }

@@ -1,9 +1,5 @@
 package dev.local.veil.core
 
-/* ------------------------------------------------------------------ */
-/* base64                                                              */
-/* ------------------------------------------------------------------ */
-
 private const val B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 fun base64DecodeBytes(input: String): ByteArray {
@@ -33,10 +29,6 @@ fun base64Decode(input: String): String =
         throw LinkParseException("Некорректный base64")
     }
 
-/* ------------------------------------------------------------------ */
-/* percent-encoding                                                    */
-/* ------------------------------------------------------------------ */
-
 fun percentDecode(input: String): String {
     if ('%' !in input) return input
     val sb = StringBuilder(input.length)
@@ -65,10 +57,6 @@ fun percentDecode(input: String): String {
     if (pending.isNotEmpty()) sb.append(pending.toByteArray().decodeToString())
     return sb.toString()
 }
-
-/* ------------------------------------------------------------------ */
-/* uri                                                                 */
-/* ------------------------------------------------------------------ */
 
 internal data class RawUri(
     val scheme: String,
@@ -142,7 +130,6 @@ internal fun parseRawUri(raw: String): RawUri {
     return RawUri(scheme, userInfo, host, port, path, parseQuery(queryString), fragment)
 }
 
-/** Детерминированный id: одна и та же ссылка → один и тот же профиль. */
 internal fun hashId(input: String): String {
     var hash = 0xcbf29ce484222325UL
     for (ch in input) {

@@ -11,32 +11,19 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-/**
- * Конфиг пробного ядра на пачку узлов — порт ProxyProbe из veil-macos.
- *
- * Раньше реальный пинг поднимал ядро на каждый узел и мерил по очереди: сотня
- * узлов шла минутами. Здесь одно ядро держит по локальному SOCKS на узел,
- * каждый вход ведёт в свой выход, и запросы идут параллельно.
- *
- * Общие части (DNS, служебные выходы вроде фрагментации) берутся из обычного
- * пробного конфига первого узла, чтобы замер шёл тем же путём, что и туннель.
- */
 object PingBatch {
 
-    /** Узлов на одно ядро: 500 входов в одном процессе стартовали бы секундами. */
     const val CHUNK = 32
 
     fun inboundTag(index: Int) = "ping-in-$index"
     fun outboundTag(index: Int) = "ping-out-$index"
 
-    /** Выходы, которые обычный конфиг строит под выбранный узел — в пачке они лишние. */
     private fun isNodeTag(tag: String?): Boolean =
         tag == null || tag == ProfileTags.DEFAULT_SELECTOR ||
             tag.startsWith("srv-") || tag.startsWith("grp-") || tag.startsWith("bal-")
 
     private fun JsonObject.tag(): String? = (this["tag"] as? JsonPrimitive)?.contentOrNull
 
-    /** Узел можно мерить пачкой: готовый конфиг из подписки несёт свою топологию. */
     fun batchable(node: ProxyConfig): Boolean = node.rawConfigJson == null
 
     fun xray(
@@ -60,8 +47,7 @@ object PingBatch {
         val doc = base.toMutableMap()
         doc.remove("observatory")
         doc.remove("burstObservatory")
-        // Адреса узлов уже разрешены, имя тестового сайта разрешает сам узел:
-        // свой DNS пробному ядру не нужен, а с ним запросы ушли бы в первый узел.
+
         doc.remove("dns")
         doc["inbounds"] = buildJsonArray {
             ports.forEachIndexed { index, port ->
@@ -83,7 +69,7 @@ object PingBatch {
             }
         }
         doc["outbounds"] = buildJsonArray {
-            // Первый выход — выход по умолчанию: пусть это будет служебный, а не узел.
+
             service.forEach { add(it) }
             nodes.forEachIndexed { index, node -> add(XrayConfig.outbound(node, outboundTag(index), options)) }
         }
@@ -123,8 +109,7 @@ object PingBatch {
 
         val doc = base.toMutableMap()
         doc.remove("experimental")
-        // DNS обычного конфига ходит через выход «proxy», которого в пачке нет.
-        // Как на macOS: системный резолвер, имя сайта всё равно разрешает узел.
+
         doc["dns"] = buildJsonObject {
             putJsonArray("servers") {
                 add(buildJsonObject { put("type", "local"); put("tag", "local") })

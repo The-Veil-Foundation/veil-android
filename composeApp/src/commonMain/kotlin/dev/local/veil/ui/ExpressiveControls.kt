@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 
-/** Large primary action with a spring-driven round-to-square press state. */
 @Composable
 internal fun ExpressiveActionButton(
     onClick: () -> Unit,

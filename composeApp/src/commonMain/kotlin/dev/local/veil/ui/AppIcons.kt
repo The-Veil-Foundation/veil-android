@@ -1,4 +1,6 @@
 package dev.local.veil.ui
+import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.FileUpload
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -67,11 +69,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 
-/**
- * Единый набор иконок приложения — стандартные Material Rounded.
- * Имена нейтральные, чтобы экранный код не зависел от конкретного набора.
- */
 object AppIcons {
+    val Download = androidx.compose.material.icons.Icons.Rounded.FileDownload
+    val Upload = androidx.compose.material.icons.Icons.Rounded.FileUpload
     val Server = Icons.Rounded.Dns
     val ServerAlt = Icons.Rounded.Storage
     val Cloud = Icons.Rounded.CloudSync
@@ -133,7 +133,6 @@ object AppIcons {
     val Wifi = Icons.Rounded.Wifi
 }
 
-/** Иконка темы по умолчанию: размер и цвет берутся из `LocalContentColor`. */
 @Composable
 fun AppIcon(
     icon: ImageVector,

@@ -23,14 +23,6 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import kotlin.concurrent.thread
 
-/**
- * Перенос подписок на приставку по локальной сети.
- *
- * Приставка поднимает крошечный HTTP-сервер на случайном порту и показывает
- * QR с адресом и одноразовым токеном. Телефон сканирует его в Veil и
- * отправляет подписки; либо открывает адрес камерой и вставляет ссылку на
- * странице. Сервер работает, пока открыт экран приёма.
- */
 class AndroidTransferService(private val context: Context) : TransferService {
 
     override val isTelevision: Boolean
@@ -47,10 +39,7 @@ class AndroidTransferService(private val context: Context) : TransferService {
     }
 
     override fun startReceiving(onReceived: (TransferPayload) -> Unit): ReceiveSession? {
-        // Эмулятор сидит за NAT Мака и видит только 10.0.2.15, до которого
-        // телефон не дойдёт. Для проверки адрес и порт подменяются снаружи:
-        // adb shell setprop debug.veil.pair_host 192.168.x.y (+ pair_port).
-        // Свойства debug.* ставит только adb, обычному пользователю они пусты.
+
         val address = systemProperty("debug.veil.pair_host") ?: lanAddress() ?: return null
         val fixedPort = systemProperty("debug.veil.pair_port")?.toIntOrNull() ?: 0
         val token = randomToken()
@@ -65,8 +54,7 @@ class AndroidTransferService(private val context: Context) : TransferService {
                 require(Pairing.parse(pairingUrl) != null) { "Это не адрес приёма" }
                 val uri = URI(pairingUrl)
                 val body = Json.encodeToString(TransferPayload.serializer(), payload).toByteArray(Charsets.UTF_8)
-                // Сырой сокет, а не HttpURLConnection: Android запрещает обычный
-                // HTTP без шифрования, а здесь он осознанно только внутри сети.
+
                 Socket().use { socket ->
                     socket.connect(InetSocketAddress(uri.host, uri.port), 5000)
                     socket.soTimeout = 8000
@@ -97,7 +85,6 @@ class AndroidTransferService(private val context: Context) : TransferService {
         Runtime.getRuntime().exec(arrayOf("getprop", name)).inputStream.bufferedReader().use { it.readText().trim() }
     }.getOrNull()?.takeIf { it.isNotEmpty() }
 
-    /** Адрес в домашней сети; VPN-интерфейсы и мобильные пропускаем. */
     private fun lanAddress(): String? = runCatching {
         NetworkInterface.getNetworkInterfaces().toList()
             .filter { it.isUp && !it.isLoopback && !it.isVirtual }
@@ -142,7 +129,7 @@ private class PairServer(
                 try {
                     handle(client)
                 } catch (_: Exception) {
-                    // Битый запрос не должен ронять приём.
+
                 } finally {
                     runCatching { client.close() }
                 }
@@ -176,7 +163,6 @@ private class PairServer(
             }
         }
 
-        // Токен в пути — единственная защита, сравниваем без утечки по времени.
         val expected = "/pair/$token".toByteArray()
         if (!MessageDigest.isEqual(path.toByteArray(), expected)) {
             respond(client, 404, "text/plain; charset=utf-8", "Не найдено")

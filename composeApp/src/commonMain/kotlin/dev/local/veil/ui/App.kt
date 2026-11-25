@@ -2,6 +2,8 @@ package dev.local.veil.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -44,6 +46,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.background
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -77,6 +80,7 @@ private enum class Tab {
     SERVERS,
     SUBS,
     ROUTING,
+    SHARING,
     SETTINGS,
 }
 
@@ -87,9 +91,7 @@ fun App(container: AppContainer) {
     val state = remember(container) { VeilState(container, scope) }
     val status by container.vpn.status.collectAsState()
     val foreground by container.vpn.foreground.collectAsState()
-    // Composable-вызов безусловный: если звать isSystemInDarkTheme() только в
-    // ветке SYSTEM, смена темы меняет структуру групп, и Compose сбрасывает
-    // всё состояние ниже — вкладка прыгала на «Серверы».
+
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val darkTheme = when (state.settings.appearance) {
         dev.local.veil.core.Appearance.LIGHT -> false
@@ -97,24 +99,23 @@ fun App(container: AppContainer) {
         dev.local.veil.core.Appearance.SYSTEM -> state.isTv || systemDark
     }
 
-    // Навигация живёт выше обёрток темы и языка: их смена не должна
-    // пересоздавать экран, на котором стоит пользователь.
     var tab by remember { mutableStateOf(Tab.SERVERS) }
-    // Прокрутка вкладок держится здесь: подэкраны и смена вкладки убирают
-    // экран из композиции, и без этого он возвращался в самое начало.
+
     val settingsScroll = rememberScrollState()
     val routingScroll = rememberScrollState()
-    // «Источники» по умолчанию спрятаны, как на macOS после настройки
-    // подписок. Вкладка всё равно открывается из настроек: там ряд «Подписки».
-    val tabs = if (state.settings.showSourcesTab) Tab.entries else Tab.entries - Tab.SUBS
-    // Ссылка снаружи (veil://pair со страницы приставки) — как вставленная руками.
+
+    val tabs = Tab.entries.filter { candidate ->
+        (candidate != Tab.SUBS || state.settings.showSourcesTab) &&
+            (candidate != Tab.SHARING || (state.sharing != null && state.settings.showSharingTab))
+    }
+
     val incoming by dev.local.veil.core.IncomingLinks.link.collectAsState()
     LaunchedEffect(incoming) {
         dev.local.veil.core.IncomingLinks.take()?.let { state.addInput(it) }
     }
     var showSplit by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
-    // Поиск серверов живёт в верхней панели; null — поле закрыто.
+
     var serverQuery by remember { mutableStateOf<String?>(null) }
     var showQr by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
@@ -127,8 +128,7 @@ fun App(container: AppContainer) {
 
     ProvideLanguage(language) {
     OrbitTheme(darkTheme = darkTheme, pitchBlack = state.settings.pitchBlack) {
-    // Иконки статус-бара идут за анимированным фоном, а не за выбором темы:
-    // иначе на время перехода тёмные иконки ложатся на ещё тёмный фон.
+
     SystemBarsAppearance(
         darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f,
     )
@@ -140,11 +140,10 @@ fun App(container: AppContainer) {
             delay(900)
             state.autoConnectOnLaunch(status)
         }
+        LaunchedEffect(status.phase) {
+            dev.local.veil.core.AppLog.event("VPN state: ${status.phase.name}")
+        }
 
-        // Единый тикер на всё приложение: таймер в карточке не зависит от того,
-        // пересоздалась ли карточка при прокрутке или возврате в приложение.
-        // Тикаем только пока идёт сессия и приложение на экране: в фоне
-        // незачем будить композицию каждую секунду.
         var now by remember { mutableStateOf(currentTimeMillis()) }
         val ticking = foreground &&
             (status.isConnected || status.phase == VpnPhase.CONNECTING)
@@ -158,9 +157,7 @@ fun App(container: AppContainer) {
             }
         }
 
-        // Жест «назад» сначала закрывает шторку/вложенный экран и возвращает
-        // на «Серверы», и только потом выпускает из приложения.
-        PlatformBackHandler(enabled = showQr || showAdd || showLogs || showSplit || showReceive || serverQuery != null || tab != Tab.SERVERS) {
+        PlatformBackHandler(enabled = showQr || showAdd || serverQuery != null) {
             when {
                 showQr -> showQr = false
                 serverQuery != null && tab == Tab.SERVERS -> serverQuery = null
@@ -172,7 +169,6 @@ fun App(container: AppContainer) {
             }
         }
 
-        // Ошибка ядра показывается буллетином и не висит в списке.
         LaunchedEffect(status.message, status.phase) {
             val message = status.message
             if (status.phase == VpnPhase.ERROR && !message.isNullOrBlank()) {
@@ -203,17 +199,15 @@ fun App(container: AppContainer) {
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .then(
                     if (state.isTv) Modifier.padding(horizontal = 28.dp, vertical = 16.dp)
                     else Modifier,
                 ),
         ) {
-            // Адаптив M3: в ландшафте нижняя панель заменяется боковым rail.
+
             val landscape = !state.isTv && maxWidth > maxHeight
-            // Вырез под камеру в ландшафте оказывается сбоку: отодвигаем от него
-            // и rail, и контент, иначе иконки уходят под объектив.
-            // Берём именно «добавку» выреза поверх системных баров, чтобы не
-            // задвоить отступы статус-бара/навбара.
+
             val cutout = WindowInsets.safeDrawing
             val bars = WindowInsets.systemBars
             val density = LocalDensity.current
@@ -243,7 +237,7 @@ fun App(container: AppContainer) {
                 BulletinHost(bulletin = state.bulletin, onDismiss = state::dismissBulletin)
             },
             topBar = {
-              // Панели сменяют друг друга коротким слайдом без отскока.
+
               AnimatedContent(
                 targetState = if (showLogs) 100 else if (showSplit) 101 else if (showReceive) 102 else tab.ordinal,
                 transitionSpec = {
@@ -266,7 +260,7 @@ fun App(container: AppContainer) {
                                 AppIcon(AppIcons.ArrowLeft, contentDescription = tr("Назад", "Back"))
                             }
                         },
-                        title = { Text(tr("Логи ядра", "Core logs"), fontWeight = FontWeight.Black) },
+                        title = { Text(tr("Логи приложения и ядра", "App and core logs"), fontWeight = FontWeight.Black) },
                     )
                 } else if (bar == 101) {
                     TopAppBar(
@@ -298,21 +292,18 @@ fun App(container: AppContainer) {
                             containerColor = MaterialTheme.colorScheme.background,
                         ),
                         title = {
-                            val query = serverQuery
-                            if (query != null) {
-                                SearchPill(
-                                    query = query,
+                            AnimatedVisibility(
+                                visible = serverQuery != null,
+                                enter = if (reduceMotion || state.isTv) EnterTransition.None else expandHorizontally(tween(240), expandFrom = Alignment.End) + fadeIn(tween(180)),
+                                exit = if (reduceMotion || state.isTv) ExitTransition.None else shrinkHorizontally(tween(200), shrinkTowards = Alignment.End) + fadeOut(tween(140)),
+                            ) {
+                                 SearchPill(
+                                     query = serverQuery.orEmpty(),
                                     onQueryChange = { serverQuery = it },
                                     autoFocus = true,
                                     modifier = Modifier.padding(end = 4.dp),
                                 )
-                            } else {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    VeilMark(34.dp)
-                                    Spacer(Modifier.size(10.dp))
-                                    Text("Veil", fontWeight = FontWeight.Black)
-                                }
-                            }
+                             }
                         },
                         actions = {
                             if (!state.isTv && state.servers.isNotEmpty()) {
@@ -335,8 +326,6 @@ fun App(container: AppContainer) {
                         ),
                         title = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                VeilMark(30.dp)
-                                Spacer(Modifier.size(10.dp))
                                 Text(
                                     text = when (Tab.entries[bar]) {
                                         Tab.SUBS -> tr("Источники", "Sources")
@@ -358,7 +347,12 @@ fun App(container: AppContainer) {
                     enter = slideInVertically(tween(180)) { it } + fadeIn(),
                     exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(150)),
                 ) {
-                    VeilNavigationBar(current = tab, tabs = tabs, onSelect = { tab = it })
+                    VeilNavigationBar(
+                        current = tab,
+                        tabs = tabs,
+                        activeLabelOnly = state.settings.dockActiveLabelOnly,
+                        onSelect = { tab = it },
+                    )
                 }
                 }
             },
@@ -368,7 +362,7 @@ fun App(container: AppContainer) {
                     enter = scaleIn(tween(180)) + fadeIn(),
                     exit = scaleOut() + fadeOut(),
                 ) {
-                    // Скруглённый квадрат: спокойная геометрия, без морфинга.
+
                     FloatingActionButton(
                         onClick = { showAdd = true },
                         shape = MaterialTheme.shapes.medium,
@@ -380,21 +374,10 @@ fun App(container: AppContainer) {
         ) { insets ->
             val modifier = Modifier.padding(insets)
 
-            // Логи и раздельный туннель выезжают справа, основной экран отъезжает назад.
-            AnimatedContent(
-                targetState = if (showLogs) 2 else if (showSplit) 1 else if (showReceive) 3 else 0,
-                transitionSpec = {
-                    if (state.isTv) {
-                        EnterTransition.None togetherWith ExitTransition.None
-                    } else if (targetState > initialState) {
-                        (slideInHorizontally(tween(180)) { it } + fadeIn(tween(180))) togetherWith
-                            (slideOutHorizontally(tween(180)) { -it / 4 } + fadeOut(tween(180)) + scaleOut(targetScale = 0.94f))
-                    } else {
-                        (slideInHorizontally(tween(180)) { -it / 4 } + fadeIn(tween(180)) + scaleIn(initialScale = 0.94f)) togetherWith
-                            (slideOutHorizontally(tween(180)) { it } + fadeOut(tween(180)))
-                    }
-                },
-                label = "overlay",
+            PredictiveNavigation(
+                page = if (showLogs) 2 else if (showSplit) 1 else if (showReceive) 3 else 0,
+                previous = if (showLogs || showSplit || showReceive) 0 else null,
+                onBack = { showLogs = false; showSplit = false; showReceive = false },
             ) { overlay ->
             if (overlay == 2) {
                 LogsScreen(
@@ -408,20 +391,14 @@ fun App(container: AppContainer) {
             } else if (overlay == 3) {
                 ReceiveScreen(state = state, modifier = modifier.fillMaxSize())
             } else {
-                AnimatedContent(
-                    targetState = tab,
-                    transitionSpec = {
-                        if (state.isTv) {
-                            return@AnimatedContent EnterTransition.None togetherWith ExitTransition.None
-                        }
-                        // M3 fade through для нижней навигации: старый экран быстро
-                        // гаснет, новый проявляется после него с лёгким масштабом.
-                        // Два экрана не просвечивают друг сквозь друга — нет «мыла».
-                        (fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
-                            scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.96f)) togetherWith
-                            fadeOut(tween(90, easing = FastOutLinearInEasing))
-                    },
-                    label = "tab",
+                TabNavigation(
+                    page = tab,
+                    tabs = tabs,
+                    pageOrder = { it.ordinal },
+                    previous = if (tab != Tab.SERVERS && !showLogs && !showSplit && !showReceive) Tab.SERVERS else null,
+                    onSelect = { tab = it },
+                    swipeEnabled = state.settings.swipeTabs && serverQuery == null && !showAdd && !showQr,
+                    animationsEnabled = state.settings.animateTabTransitions,
                 ) { current ->
                     when (current) {
                         Tab.SERVERS -> ServersScreen(
@@ -442,6 +419,7 @@ fun App(container: AppContainer) {
                             onOpenReceive = { showReceive = true },
                         )
                         Tab.ROUTING -> RoutingScreen(state = state, modifier = modifier, homeScroll = routingScroll)
+                        Tab.SHARING -> SharingScreen(state = state, modifier = modifier.fillMaxSize())
                         Tab.SETTINGS -> SettingsScreen(
                             state = state,
                             status = status,
@@ -463,6 +441,7 @@ fun App(container: AppContainer) {
                     current = tab,
                     tabs = tabs,
                     onSelect = { tab = it },
+                    activeLabelOnly = !state.isTv && state.settings.dockActiveLabelOnly,
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .offset(x = cutoutStart)
@@ -475,8 +454,6 @@ fun App(container: AppContainer) {
 
         }
 
-        // QR приставки или «Открыть в Veil» на её странице: спрашиваем, что
-        // отправить, прежде чем ключи уйдут в сеть.
         if (state.pendingPairing != null) {
             TransferPicker(state)
         }
@@ -498,7 +475,7 @@ fun App(container: AppContainer) {
                 state = state,
                 onDone = { showAdd = false },
                 onCancel = if (state.isTv) ({ showAdd = false }) else null,
-                // На приставке камеры нет — там вместо сканера приём по QR.
+
                 onScan = if (qrSupported && !state.isTv) {
                     { showQr = true }
                 } else {
@@ -532,9 +509,13 @@ fun App(container: AppContainer) {
     }
 }
 
-/** Standard M3 navigation: active indicator behind the icon, label below it. */
 @Composable
-private fun VeilNavigationBar(current: Tab, tabs: List<Tab>, onSelect: (Tab) -> Unit) {
+private fun VeilNavigationBar(
+    current: Tab,
+    tabs: List<Tab>,
+    activeLabelOnly: Boolean,
+    onSelect: (Tab) -> Unit,
+) {
     val shown = if (current in tabs) current else Tab.SETTINGS
     NavigationBar {
         tabs.forEach { entry ->
@@ -542,7 +523,8 @@ private fun VeilNavigationBar(current: Tab, tabs: List<Tab>, onSelect: (Tab) -> 
                 selected = shown == entry,
                 onClick = { onSelect(entry) },
                 icon = { TabIcon(entry) },
-                label = { Text(tabLabel(entry)) },
+                label = { Text(tabLabel(entry), maxLines = 1) },
+                alwaysShowLabel = !activeLabelOnly,
             )
         }
     }
@@ -553,6 +535,7 @@ private fun tabLabel(entry: Tab): String = when (entry) {
     Tab.SERVERS -> tr("Серверы", "Servers")
     Tab.SUBS -> tr("Источники", "Sources")
     Tab.ROUTING -> tr("Маршрут", "Routing")
+    Tab.SHARING -> tr("Раздача", "Sharing")
     Tab.SETTINGS -> tr("Настройки", "Settings")
 }
 
@@ -563,26 +546,25 @@ private fun TabIcon(entry: Tab) {
             Tab.SERVERS -> AppIcons.Server
             Tab.SUBS -> AppIcons.Layers
             Tab.ROUTING -> AppIcons.Routing
+            Tab.SHARING -> AppIcons.Share
             Tab.SETTINGS -> AppIcons.Settings
         },
         modifier = Modifier.size(24.dp),
     )
 }
 
-/** Боковая навигация для телевизора: пульт ходит по ней без «прыжков» вниз. */
 @Composable
 private fun TvNavigationRail(
     current: Tab,
     tabs: List<Tab>,
     onSelect: (Tab) -> Unit,
+    activeLabelOnly: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val requesters = remember { Tab.entries.associateWith { FocusRequester() } }
-    // Скрытые «Источники» открываются из настроек: на рельсе их нет, поэтому
-    // подсвечен и держит фокус пункт «Настройки», а не случайный первый.
+
     val shown = if (current in tabs) current else Tab.SETTINGS
-    // На телевизоре первый кадр не сразу принимает фокус: пробуем несколько раз,
-    // иначе пульт «застревает» на поле поиска или вообще ни на чём.
+
     LaunchedEffect(shown) {
         repeat(12) {
             delay(180)
@@ -610,17 +592,12 @@ private fun TvNavigationRail(
                     icon = { TabIcon(entry) },
                     label = {
                         Text(
-                            text = when (entry) {
-                                Tab.SERVERS -> tr("Серверы", "Servers")
-                                Tab.SUBS -> tr("Источники", "Sources")
-                                Tab.ROUTING -> tr("Маршрут", "Routing")
-                                Tab.SETTINGS -> tr("Настройки", "Settings")
-                            },
+                            text = tabLabel(entry),
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,
                         )
                     },
-                    alwaysShowLabel = true,
+                    alwaysShowLabel = !activeLabelOnly,
                     modifier = Modifier
                         .tvFocusRing(RoundedCornerShape(20.dp))
                         .focusRequester(requesters.getValue(entry)),

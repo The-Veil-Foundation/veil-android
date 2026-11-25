@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -51,6 +52,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -58,15 +63,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.local.veil.core.ProxyConfig
+import dev.local.veil.core.AppLanguage
 import dev.local.veil.platform.VpnStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-
-/* ------------------------------------------------------------------ */
-/* Каркас листа: шапка, список действий, страницы «Посмотреть» и «QR»  */
-/* ------------------------------------------------------------------ */
 
 internal enum class SheetPage { ACTIONS, DETAILS, QR }
 
@@ -75,9 +77,10 @@ internal class SheetAction(
     val title: String,
     val subtitle: String? = null,
     val destructive: Boolean = false,
-    /** Если задан — действие сначала просит подтверждения этим текстом. */
+
     val confirmText: String? = null,
     val enabled: Boolean = true,
+    val selected: Boolean? = null,
     val onClick: () -> Unit,
 )
 
@@ -88,7 +91,7 @@ internal class SheetController(
     private val dismiss: () -> Unit,
     val navigate: (SheetPage) -> Unit,
 ) {
-    /** Выполняет [after] сразу и плавно убирает лист вниз. */
+
     fun close(after: () -> Unit = {}) {
         after()
         scope.launch {
@@ -110,16 +113,41 @@ private fun ActionsSheet(
     details: (@Composable (reveal: Boolean) -> Unit)?,
     buildActions: (SheetController) -> List<SheetAction>,
     onDismiss: () -> Unit,
+    onRename: ((String) -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     var page by remember { mutableStateOf(SheetPage.ACTIONS) }
     var reveal by remember { mutableStateOf(false) }
     var confirming by remember { mutableStateOf<SheetAction?>(null) }
+    var renaming by remember { mutableStateOf(false) }
+    var newName by remember(title) { mutableStateOf(title) }
     val seen = remember { mutableSetOf<Any>() }
     val controller = remember { SheetController(scope, sheetState, onDismiss) { page = it } }
-    // Высота листа меняется вместе со страницей; на низком экране (TV,
-    // ландшафт) лист оставался на старой отметке и обрезал низ страницы.
+    if (renaming) AlertDialog(
+        onDismissRequest = { renaming = false },
+        title = { Text(tr("Переименовать", "Rename")) },
+        text = {
+            OutlinedTextField(
+                value = newName,
+                onValueChange = { newName = it },
+                label = { Text(tr("Название", "Name")) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(enabled = newName.isNotBlank(), onClick = {
+                onRename?.invoke(newName.trim())
+                renaming = false
+                controller.close()
+            }) { Text(tr("Сохранить", "Save")) }
+        },
+        dismissButton = {
+            TextButton(onClick = { renaming = false }) { Text(tr("Отмена", "Cancel")) }
+        },
+    )
+
     LaunchedEffect(page) {
         if (page != SheetPage.ACTIONS && sheetState.isVisible) {
             delay(220)
@@ -132,8 +160,7 @@ private fun ActionsSheet(
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
     ) {
-        // Лист прокручивается целиком: в горизонтальном положении пункты не
-        // помещаются по высоте, и последний — красное «Удалить» — пропадал.
+
         Column(
             Modifier
                 .fillMaxWidth()
@@ -158,8 +185,17 @@ private fun ActionsSheet(
             ) { current ->
                 when (current) {
                     SheetPage.ACTIONS -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        val actions = remember(onDismiss) { buildActions(controller) }
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        val actions = buildList {
+                            if (onRename != null) add(SheetAction(AppIcons.Edit, tr("Переименовать", "Rename")) {
+                                newName = title
+                                renaming = true
+                            })
+                            addAll(buildActions(controller))
+                        }
+                        Column(
+                            modifier = if (actions.any { it.selected != null }) Modifier.selectableGroup() else Modifier,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
                             actions.forEachIndexed { index, action ->
                                 ActionTile(
                                     action = action,
@@ -291,7 +327,6 @@ private fun PageBar(title: String, onBack: () -> Unit, actions: @Composable () -
     }
 }
 
-/** Плитка действия: сегментированный список, пружинное нажатие, каскадное появление. */
 @Composable
 private fun ActionTile(
     action: SheetAction,
@@ -306,11 +341,15 @@ private fun ActionTile(
     val bottom = if (index == last) 28.dp else 10.dp
     val container = if (action.destructive) {
         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+    } else if (action.selected == true) {
+        MaterialTheme.colorScheme.primaryContainer
     } else {
         MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val content = if (action.destructive) {
         MaterialTheme.colorScheme.onErrorContainer
+    } else if (action.selected == true) {
+        MaterialTheme.colorScheme.onPrimaryContainer
     } else {
         MaterialTheme.colorScheme.onSurface
     }
@@ -323,6 +362,12 @@ private fun ActionTile(
         contentColor = content,
         modifier = Modifier
             .fillMaxWidth()
+            .then(action.selected?.let { isSelected ->
+                Modifier.semantics {
+                    selected = isSelected
+                    role = Role.RadioButton
+                }
+            } ?: Modifier)
             .tvFocusRing(RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom))
             .staggerIn(seen, "tile-$index", index)
             .graphicsLayer { scaleX = scale; scaleY = scale },
@@ -343,13 +388,42 @@ private fun ActionTile(
                     )
                 }
             }
+            if (action.selected == true) {
+                AppIcon(AppIcons.Check)
+            }
         }
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Лист сервера                                                        */
-/* ------------------------------------------------------------------ */
+internal fun languageTitle(language: AppLanguage): String =
+    if (language == AppLanguage.SYSTEM) tr("Системный", "System") else language.nativeLabel
+
+@Composable
+internal fun LanguageActionsSheet(
+    selectedLanguage: AppLanguage,
+    onSelect: (AppLanguage) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ActionsSheet(
+        icon = AppIcons.Global,
+        title = tr("Язык", "Language"),
+        subtitle = tr("Язык интерфейса", "Interface language"),
+        qrText = null,
+        qrCaption = "",
+        onShareQr = null,
+        details = null,
+        buildActions = { sheet ->
+            AppLanguage.entries.map { language ->
+                SheetAction(
+                    icon = if (language == AppLanguage.SYSTEM) AppIcons.Devices else AppIcons.Global,
+                    title = languageTitle(language),
+                    selected = language == selectedLanguage,
+                ) { sheet.close { onSelect(language) } }
+            }
+        },
+        onDismiss = onDismiss,
+    )
+}
 
 @Composable
 fun ServerActionsSheet(
@@ -361,9 +435,7 @@ fun ServerActionsSheet(
     val clipboard = LocalClipboardManager.current
     val link = remember(server) { state.linkFor(server) }
     var editingConfig by remember { mutableStateOf(false) }
-    // «Конфигурация» закрывает лист и открывает своё окно.
-    // Окно живёт в этом же composable, поэтому вызывающему сообщаем о закрытии
-    // только когда закрыто и оно: иначе он уберёт лист вместе с окном.
+
     var sheetGone by remember { mutableStateOf(false) }
     LaunchedEffect(sheetGone, editingConfig) {
         if (sheetGone && !editingConfig) onDismiss()
@@ -391,8 +463,7 @@ fun ServerActionsSheet(
                 add(SheetAction(AppIcons.Eye, tr("Посмотреть", "View"), tr("Параметры узла", "Server details")) {
                     sheet.navigate(SheetPage.DETAILS)
                 })
-                // Редактор узла с macOS: JSON, ссылка или конфиг WireGuard.
-                // Свой узел правится и проверяется ядром, узел подписки читается.
+
                 add(
                     SheetAction(
                         icon = AppIcons.Document,
@@ -435,6 +506,9 @@ fun ServerActionsSheet(
             }
         },
         onDismiss = { sheetGone = true },
+        onRename = { name ->
+            state.saveAnnotation(server.id, state.annotationFor(server.id).copy(nameOverride = name))
+        },
     )
 
     if (editingConfig) {
@@ -447,7 +521,6 @@ fun ServerActionsSheet(
     }
 }
 
-/** Параметры узла. Ключи скрыты, пока их явно не покажут. */
 @Composable
 private fun ServerDetails(server: ProxyConfig, reveal: Boolean) {
     val rows = buildList {
@@ -525,10 +598,6 @@ private fun prettyJson(raw: String): String = runCatching {
     pretty.encodeToString(JsonElement.serializer(), Json.parseToJsonElement(raw))
 }.getOrDefault(raw)
 
-/* ------------------------------------------------------------------ */
-/* Лист подписки / группы                                              */
-/* ------------------------------------------------------------------ */
-
 @Composable
 fun SubscriptionActionsSheet(
     state: VeilState,
@@ -552,7 +621,7 @@ fun SubscriptionActionsSheet(
         details = null,
         buildActions = { sheet ->
             buildList {
-                // Пинг группы и сворачивание — уже кнопки на самой карточке, здесь не дублируем.
+
                 if (source != null) {
                     add(SheetAction(AppIcons.Refresh, tr("Обновить подписку", "Refresh subscription")) {
                         sheet.close {
@@ -587,5 +656,8 @@ fun SubscriptionActionsSheet(
             }
         },
         onDismiss = onDismiss,
+        onRename = if (source == null) null else { name ->
+            state.updateSubscription(source) { it.copy(name = name) }
+        },
     )
 }

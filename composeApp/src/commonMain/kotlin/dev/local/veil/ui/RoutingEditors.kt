@@ -36,11 +36,6 @@ import dev.local.veil.core.TargetKind
 import dev.local.veil.core.singboxCompatible
 import dev.local.veil.core.xrayCompatible
 
-/* ------------------------------------------------------------------ */
-/* Цель правила — порт RuleTargetPicker.swift                          */
-/* ------------------------------------------------------------------ */
-
-/** Подпись цели с именем узла или группы. */
 internal fun ruleTargetLabel(target: RuleTarget, servers: List<ProxyConfig>, groups: List<ServerGroup>): String =
     when (target.kind) {
         TargetKind.SERVER -> servers.firstOrNull { it.id == target.id }?.name
@@ -50,10 +45,6 @@ internal fun ruleTargetLabel(target: RuleTarget, servers: List<ProxyConfig>, gro
         else -> ruleTargetTitle(target)
     }
 
-/**
- * Куда отправить совпадения: прокси, напрямую, блок, группа или конкретный
- * узел. Узлы выбираются в отдельном списке — их может быть сотни.
- */
 @Composable
 internal fun RuleTargetPicker(
     title: String,
@@ -151,10 +142,6 @@ private fun ServerPickerDialog(
     )
 }
 
-/* ------------------------------------------------------------------ */
-/* Выбор приложений — порт ProcessPickerSheet.swift                    */
-/* ------------------------------------------------------------------ */
-
 @Composable
 internal fun AppPickerDialog(
     state: VeilState,
@@ -225,10 +212,6 @@ internal fun AppPickerDialog(
     )
 }
 
-/* ------------------------------------------------------------------ */
-/* Редактор правила — порт RuleCard из RoutingSheet.swift              */
-/* ------------------------------------------------------------------ */
-
 private val SNIFFED_PROTOCOLS = listOf("http", "tls", "quic", "dns", "stun", "bittorrent", "dtls", "ssh", "rdp")
 
 @Composable
@@ -252,8 +235,7 @@ internal fun RuleDialog(
     var network by remember { mutableStateOf(initial.network) }
     var protocols by remember { mutableStateOf(initial.protocols) }
     var ruleSets by remember { mutableStateOf(initial.ruleSets.joinToString("\n")) }
-    // Режим Clash на Android не переключается, поэтому в редакторе его нет;
-    // значение из импортированного правила сохраняется как есть.
+
     val clashMode = initial.clashMode
     var invert by remember { mutableStateOf(initial.invert) }
     var enabled by remember { mutableStateOf(initial.enabled) }
@@ -435,10 +417,6 @@ internal fun RuleHint(text: String) {
     )
 }
 
-/* ------------------------------------------------------------------ */
-/* Шаблоны — порт RuleTemplate                                         */
-/* ------------------------------------------------------------------ */
-
 internal data class RuleTemplate(val title: () -> String, val rule: () -> RoutingRule)
 
 internal val ruleTemplates: List<RuleTemplate> = listOf(
@@ -469,10 +447,6 @@ internal val ruleTemplates: List<RuleTemplate> = listOf(
         RoutingRule(name = "LAN direct", target = RuleTarget.Direct, ips = RoutingPreset.PRIVATE_CIDRS)
     },
 )
-
-/* ------------------------------------------------------------------ */
-/* DNS-правило — порт DNSRule                                          */
-/* ------------------------------------------------------------------ */
 
 @Composable
 internal fun DnsRuleDialog(

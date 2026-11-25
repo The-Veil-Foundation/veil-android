@@ -5,16 +5,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/* ------------------------------------------------------------------ */
-/* Порт RuleSet.swift из veil-macos                                    */
-/* ------------------------------------------------------------------ */
-
-/**
- * Теги выходов, общие для всех сборщиков конфига.
- *
- * Теги должны быть стабильны между пересборками — сохранённое правило ссылается
- * на них, — поэтому строятся из id узла или группы, а не из имени.
- */
 object ProfileTags {
     const val DEFAULT_SELECTOR = "proxy"
     const val DIRECT = "direct"
@@ -27,23 +17,19 @@ object ProfileTags {
     fun ruleSetGeoip(code: String): String = "geoip-" + code.lowercase()
 }
 
-/**
- * Rule-set sing-box: замена полей `geosite:` / `geoip:`, которые убрали из
- * route-правил в sing-box 1.12. Удалённые наборы ядро качает и кэширует само.
- */
 @Serializable
 data class RuleSetRef(
     val id: String = newId(),
     val tag: String,
     val kind: Kind = Kind.REMOTE,
     val format: Format = Format.BINARY,
-    /** Только для удалённых. */
+
     val url: String = "",
-    /** Только для локальных. */
+
     val path: String = "",
-    /** Как часто sing-box обновляет удалённый набор. */
+
     val updateInterval: String = "1d",
-    /** Через какой выход качать удалённый набор. Пусто — решает ядро. */
+
     val downloadDetour: String = ProfileTags.DIRECT,
 ) {
     @Serializable
@@ -52,7 +38,6 @@ data class RuleSetRef(
     @Serializable
     enum class Format { BINARY, SOURCE }
 
-    /** Элемент `route.rule_set[]`, или null, если ссылка пустая. */
     fun json(): JsonObject? {
         when (kind) {
             Kind.REMOTE -> if (url.isBlank()) return null
@@ -74,10 +59,6 @@ data class RuleSetRef(
     }
 }
 
-/**
- * Превращает `geosite:` / `geoip:` из списка правил в конкретные rule-set.
- * Репозитории SagerNet публикуют готовый `.srs` на каждую категорию.
- */
 object RuleSetCatalog {
 
     fun geositeUrl(code: String): String =
@@ -86,13 +67,8 @@ object RuleSetCatalog {
     fun geoipUrl(code: String): String =
         "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-${code.lowercase()}.srs"
 
-    /** У `geoip:private` есть родной матчер (`ip_is_private`), rule-set не нужен. */
     const val PRIVATE_GEOIP_CODE = "private"
 
-    /**
-     * Все rule-set, которые подразумевают правила, без повторов и по порядку.
-     * Явные (заданные руками) побеждают выведенные с тем же тегом.
-     */
     fun derive(
         rules: List<RoutingRule>,
         dnsRules: List<DnsRule> = emptyList(),
@@ -138,13 +114,6 @@ object RuleSetCatalog {
     }
 }
 
-/**
- * Раскладывает матчеры в Xray-синтаксисе по типизированным полям sing-box.
- *
- * Голая запись `example.com` у Xray — подстрока, но каждый GUI имеет в виду
- * «этот домен и поддомены». sing-box получает второе прочтение
- * (`domain` + `domain_suffix`).
- */
 object MatcherSyntax {
 
     fun geositeCode(entry: String): String? = prefixValue(entry, "geosite:")
@@ -181,14 +150,13 @@ object MatcherSyntax {
                 lower.startsWith("domain:") -> appendSubdomain(entry.drop(7), out)
                 lower.startsWith("keyword:") -> out.keyword += entry.drop(8)
                 lower.startsWith("regexp:") -> out.regex += entry.drop(7)
-                lower.startsWith("ext:") -> Unit // внешний .dat: только Xray
+                lower.startsWith("ext:") -> Unit
                 else -> appendSubdomain(entry, out)
             }
         }
         return out
     }
 
-    /** «Домен и всё под ним»: апекс точно, суффикс с ведущей точкой. */
     private fun appendSubdomain(value: String, out: Domains) {
         val host = value.trim().trim('.')
         if (host.isEmpty()) return
@@ -219,12 +187,6 @@ object MatcherSyntax {
         return out
     }
 
-    /**
-     * Порты для sing-box: одиночные в `port`, диапазоны в `port_range`.
-     * Принимает "443", "443,8443", "1000-2000", "1000:2000", ":1024".
-     * Диапазоны выходят как "a:b"; всё, что ядро отвергло бы, отбрасывается,
-     * чтобы одна опечатка не мешала старту.
-     */
     fun ports(text: String): Pair<List<Int>, List<String>> {
         val ports = mutableListOf<Int>()
         val ranges = mutableListOf<String>()
@@ -250,7 +212,7 @@ object MatcherSyntax {
         if (parts.size != 2) return null
         val (lower, upper) = parts
         if (lower.isEmpty() && upper.isEmpty()) return null
-        // "a-" и "-b" — опечатка или отрицательное число; открытый конец только через двоеточие.
+
         if ((lower.isEmpty() || upper.isEmpty()) && !colon) return null
         val low = if (lower.isEmpty()) null else port(lower) ?: return null
         val high = if (upper.isEmpty()) null else port(upper) ?: return null
@@ -258,10 +220,6 @@ object MatcherSyntax {
         return "${low ?: ""}:${high ?: ""}"
     }
 
-    /**
-     * Порты в Xray-формате: "443,1000-2000". Xray понимает только дефис,
-     * открытые концы заменяются на 1 и 65535.
-     */
     fun xrayPorts(text: String): String? {
         val (ports, ranges) = ports(text)
         val pieces = ports.map { it.toString() } + ranges.map { range ->

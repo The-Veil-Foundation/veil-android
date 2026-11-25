@@ -53,14 +53,8 @@ import dev.local.veil.platform.LogProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Чей лог на экране: рабочего туннеля или пробного ядра (пинги и проверки). */
-private enum class LogSource { TUNNEL, CHECKS }
+private enum class LogSource { APP, TUNNEL, CHECKS }
 
-/**
- * Лог ядра, как панель логов на macOS: фильтр по тексту и по уровню,
- * счётчик «видно / всего», копируется то, что видно. Пока экран открыт, лог
- * подтягивается сам и идёт за концом, только если читатель и так внизу.
- */
 @Composable
 fun LogsScreen(
     provider: LogProvider,
@@ -68,7 +62,7 @@ fun LogsScreen(
     onBack: () -> Unit = {},
     onBulletin: (String) -> Unit = {},
 ) {
-    var source by remember { mutableStateOf(LogSource.TUNNEL) }
+    var source by remember { mutableStateOf(LogSource.APP) }
     var raw by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var minimum by remember { mutableStateOf<LogSeverity?>(null) }
@@ -77,15 +71,23 @@ fun LogsScreen(
     val listState = rememberLazyListState()
 
     suspend fun read(from: LogSource): String =
-        if (from == LogSource.TUNNEL) provider.read() else provider.readChecks()
+        when (from) {
+            LogSource.APP -> dev.local.veil.core.AppLog.read()
+            LogSource.TUNNEL -> provider.read()
+            LogSource.CHECKS -> provider.readChecks()
+        }
 
-    // Живой хвост: раз в секунду, пока экран на виду. Файл маленький
-    // (последние 2000 строк), а строки разбираются только при изменении.
     LaunchedEffect(source) {
         raw = null
+        var previous: String? = null
         while (true) {
             val next = read(source)
-            if (next != raw) raw = next
+            if (next != previous) {
+                raw = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    dev.local.veil.core.SecretRedactor.redact(next)
+                }
+                previous = next
+            }
             delay(1000)
         }
     }
@@ -94,8 +96,6 @@ fun LogsScreen(
     val shown = remember(all, query, minimum) { LogFilter.apply(all, query, minimum) }
     val filtering = query.isNotBlank() || minimum != null
 
-    // Идём за концом, только если читатель уже внизу: прокрутка назад к
-    // ошибке не должна сбиваться следующей строкой.
     val atEnd by remember {
         derivedStateOf {
             val info = listState.layoutInfo
@@ -123,7 +123,11 @@ fun LogsScreen(
                     shape = SegmentedButtonDefaults.itemShape(index, LogSource.entries.size),
                     label = {
                         Text(
-                            if (entry == LogSource.TUNNEL) tr("Туннель", "Tunnel") else tr("Проверки", "Checks"),
+                            when (entry) {
+                                LogSource.APP -> tr("Приложение", "App")
+                                LogSource.TUNNEL -> tr("Туннель", "Tunnel")
+                                LogSource.CHECKS -> tr("Проверки", "Checks")
+                            },
                         )
                     },
                 )
@@ -154,8 +158,7 @@ fun LogsScreen(
             IconButton(
                 enabled = shown.isNotEmpty(),
                 onClick = {
-                    // Копируется то, что видно: под фильтром тысяча скрытых
-                    // строк — не то, о чём просили.
+
                     clipboard.setText(AnnotatedString(shown.joinToString("\n") { it.text }))
                     onBulletin(tr("Лог скопирован", "Log copied"))
                 },
@@ -163,8 +166,19 @@ fun LogsScreen(
             IconButton(
                 enabled = all.isNotEmpty(),
                 onClick = {
-                    if (source == LogSource.TUNNEL) provider.clear() else provider.clearChecks()
-                    scope.launch { raw = read(source) }
+                    when (source) {
+                        LogSource.APP -> dev.local.veil.core.AppLog.clear()
+                        LogSource.TUNNEL -> provider.clear()
+                        LogSource.CHECKS -> provider.clearChecks()
+                    }
+                    val requested = source
+                    scope.launch {
+                        val text = read(requested)
+                        val cleaned = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            dev.local.veil.core.SecretRedactor.redact(text)
+                        }
+                        if (source == requested) raw = cleaned
+                    }
                     onBulletin(tr("Лог очищен", "Log cleared"))
                 },
             ) { AppIcon(AppIcons.Trash, contentDescription = tr("Очистить", "Clear"), modifier = Modifier.size(20.dp)) }
@@ -178,7 +192,9 @@ fun LogsScreen(
             when {
                 raw == null -> Placeholder(tr("Читаю лог…", "Reading the log…"))
                 all.isEmpty() -> Placeholder(
-                    if (source == LogSource.TUNNEL) {
+                    if (source == LogSource.APP) {
+                        tr("Событий приложения пока нет.", "No app events yet.")
+                    } else if (source == LogSource.TUNNEL) {
                         tr("Логов пока нет. Они появятся, когда туннель подключится.", "No logs yet. They appear once the tunnel connects.")
                     } else {
                         tr("Логов пока нет. Их пишет ядро, которое меряет пинг и проверяет узлы.", "No logs yet. The core that pings and checks servers writes them.")
@@ -221,7 +237,6 @@ private fun Placeholder(text: String) {
     }
 }
 
-/** Строка лога: полоска уровня слева, моноширинный текст, ошибки — цветом. */
 @Composable
 private fun LogRow(line: LogLine) {
     val scheme = MaterialTheme.colorScheme

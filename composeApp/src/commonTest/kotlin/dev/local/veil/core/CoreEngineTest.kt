@@ -36,7 +36,7 @@ class CoreEngineTest {
 
     @Test
     fun autoUsesXrayForXhttpTransport() {
-        // XHTTP есть только в Xray, поэтому даже в режиме «Авто» — Xray.
+
         val server = node(ProxyProtocol.VLESS, TransportNetwork.XHTTP)
         assertEquals(CoreEngine.XRAY, CoreEngine.AUTO.resolve(server))
         assertTrue(server.xrayCompatible)
@@ -52,7 +52,7 @@ class CoreEngineTest {
 
     @Test
     fun engineIsAlwaysAutomaticInTunnelOptions() {
-        // Ручного выбора в UI нет: даже сохранённое значение игнорируется.
+
         val settings = AppSettings(coreEngine = CoreEngine.SING_BOX)
         assertEquals(CoreEngine.AUTO, settings.toTunnelOptions().coreEngine)
     }

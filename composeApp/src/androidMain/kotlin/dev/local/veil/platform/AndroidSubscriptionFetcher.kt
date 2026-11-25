@@ -8,22 +8,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
 
-/**
- * Загрузчик подписок.
- *
- * Remnawave (и совместимые панели) при включённом HWID отдают заглушку
- * «App not supported», пока клиент не пришлёт `X-Hwid` вместе с описанием
- * устройства. Идентификатор стабилен для установки: он же служит ключом
- * привязки устройства на панели.
- */
 class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
 
     private val prefs = context.getSharedPreferences("veil", Context.MODE_PRIVATE)
 
-    /**
-     * HWID в верхнем регистре, как на macOS. Значение старых сборок (нижний
-     * регистр) переводится один раз и записывается обратно.
-     */
     override val deviceId: String
         get() {
             val stored = prefs.getString(KEY_HWID, null)?.takeIf { it.isNotBlank() } ?: return regenerateDeviceId()
@@ -47,7 +35,7 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
     override var userAgent: String
         get() = dev.local.veil.core.effectiveUserAgent(prefs.getString(KEY_UA, null))
         set(value) {
-            // Пусто — «по умолчанию»: не храним, чтобы UA шёл за версией приложения.
+
             val custom = value.trim().takeUnless { it.isEmpty() || it in dev.local.veil.core.LEGACY_DEFAULT_USER_AGENTS }
             prefs.edit().apply { if (custom == null) remove(KEY_UA) else putString(KEY_UA, custom) }.apply()
         }
@@ -87,10 +75,6 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
         }
     }
 
-    /**
-     * `subscription-userinfo: upload=0; download=1073741824; total=107374182400; expire=1767225600`
-     * Так делают Remnawave, Marzban и Happ-совместимые панели.
-     */
     private fun parseUsage(header: String?): SubscriptionUsage? {
         val raw = header?.takeIf { it.isNotBlank() } ?: return null
         val values = raw.split(';')
@@ -109,11 +93,6 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
         )
     }
 
-    /**
-     * Панели шлют заголовки и как обычный текст, и как base64. Префикс
-     * `base64:` встречается в обоих регистрах, а полезная нагрузка бывает
-     * URL-safe и без выравнивающих символов — всё это нужно принимать.
-     */
     private fun decodeHeader(raw: String?): String {
         val value = raw?.trim().orEmpty()
         if (value.isEmpty()) return ""
@@ -135,8 +114,7 @@ class AndroidSubscriptionFetcher(context: Context) : SubscriptionFetcher {
             }
             String(java.util.Base64.getDecoder().decode(padded), Charsets.UTF_8)
         }.getOrNull()
-        // Если был явный префикс, но раскодировать не вышло — это не заголовок,
-        // а мусор от панели: лучше пустое значение, чем «base64:...» в списке.
+
         if (decoded == null) return if (hasPrefix) "" else value
         if (decoded.isBlank()) return if (hasPrefix) "" else value
         val printable = decoded.count { it == '\n' || it == '\r' || it == '\t' || it.code in 32..126 || it.code > 127 }

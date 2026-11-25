@@ -57,13 +57,8 @@ import dev.local.veil.core.ProxyConfig
 import dev.local.veil.core.Subscription
 import dev.local.veil.platform.VpnStatus
 
-/** Ключ «источника» для узлов, добавленных вручную. */
 private const val MANUAL = "manual"
 
-/**
- * Источники — порт SourcesView из veil-macos: откуда взялись серверы, что
- * вернула панель и что с этим источником можно сделать.
- */
 @Composable
 fun SubscriptionsScreen(
     state: VeilState,
@@ -74,51 +69,32 @@ fun SubscriptionsScreen(
 ) {
     var opened by remember { mutableStateOf<String?>(null) }
 
-    SourcesList(
-        state = state,
-        modifier = modifier,
-        onOpen = { opened = it },
-        onAdd = onAdd,
-        onOpenReceive = onOpenReceive,
-    )
-
-    val key = opened
-    val subscription = key?.let { url -> state.subscriptions.firstOrNull { it.url == url } }
-    val manualOpen = key == MANUAL && state.servers.any { it.source == null }
-    if (subscription != null || manualOpen) {
-        Dialog(
-            onDismissRequest = { opened = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            val background = MaterialTheme.colorScheme.background
-            Box(Modifier.fillMaxSize().background(background)) {
-                Surface(Modifier.fillMaxSize().statusBarsPadding(), color = background) {
-                    SourceDetail(
-                        state = state,
-                        status = status,
-                        subscription = subscription,
-                        modifier = Modifier.fillMaxSize(),
-                        onBack = { opened = null },
-                    )
-                }
-                // Экран источника — отдельное окно поверх приложения, и общие
-                // уведомления оказались бы под ним: «Копия добавлена» не видна.
-                BulletinHost(
-                    bulletin = state.bulletin,
-                    onDismiss = state::dismissBulletin,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                )
-            }
+    val home = "sources-home"
+    PredictiveNavigation(
+        page = opened ?: home,
+        previous = if (opened != null) home else null,
+        onBack = { opened = null },
+        modifier = modifier.fillMaxSize(),
+    ) { key ->
+        if (key == home) {
+            SourcesList(
+                state = state,
+                modifier = Modifier.fillMaxSize(),
+                onOpen = { opened = it },
+                onAdd = onAdd,
+                onOpenReceive = onOpenReceive,
+            )
+        } else {
+            SourceDetail(
+                state = state,
+                status = status,
+                subscription = state.subscriptions.firstOrNull { it.url == key },
+                modifier = Modifier.fillMaxSize(),
+                onBack = { opened = null },
+            )
         }
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* Список источников                                                   */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun SourcesList(
@@ -226,7 +202,6 @@ private fun SourceRow(
     }
 }
 
-/** Ни одного источника: одна понятная точка входа, как на экране серверов. */
 @Composable
 private fun EmptySources(onAdd: () -> Unit, onOpenReceive: () -> Unit, modifier: Modifier) {
     Box(modifier.fillMaxSize().padding(horizontal = 28.dp), contentAlignment = Alignment.Center) {
@@ -269,14 +244,6 @@ private fun EmptySources(onAdd: () -> Unit, onOpenReceive: () -> Unit, modifier:
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Экран источника                                                     */
-/* ------------------------------------------------------------------ */
-
-/**
- * Один источник, как деталь SourcesView на macOS: сводка, что не удалось
- * прочитать, и узлы. Действия — те же, что в контекстном меню источника там.
- */
 @Composable
 private fun SourceDetail(
     state: VeilState,
@@ -490,7 +457,6 @@ private fun SourceDetail(
     }
 }
 
-/** Что панель вернула, но прочитать не вышло — чтобы было видно, куда делся узел. */
 @Composable
 private fun SkippedCard(skipped: List<String>) {
     Surface(
@@ -527,21 +493,12 @@ private fun SkippedCard(skipped: List<String>) {
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Узел в том виде, в каком его хотят читать                           */
-/* ------------------------------------------------------------------ */
-
 private fun kindTitle(kind: NodeRepresentation.Kind): String = when (kind) {
     NodeRepresentation.Kind.WIREGUARD -> tr("Конфиг WireGuard", "WireGuard config")
     NodeRepresentation.Kind.JSON -> "Outbound JSON"
     NodeRepresentation.Kind.LINK -> tr("Ссылка", "Share link")
 }
 
-/**
- * Порт NodeEditorSheet из veil-macos: узел как конфиг WireGuard, outbound JSON
- * или ссылка. Свой узел («Вручную») можно править и проверить ядром, узел
- * подписки — только прочитать или продублировать во «Вручную».
- */
 @Composable
 internal fun NodeEditorDialog(
     state: VeilState,
@@ -566,7 +523,6 @@ internal fun NodeEditorDialog(
         message = e.message ?: e.toString(); bad = true; null
     }
 
-    // Спрашивает настоящее ядро: сообщение, которое читает человек, — его собственное.
     suspend fun check(): ProxyConfig? {
         val node = parsed() ?: return null
         checking = true
@@ -579,8 +535,7 @@ internal fun NodeEditorDialog(
             is VeilState.NodeCheck.Failed -> {
                 message = outcome.message; bad = true; null
             }
-            // Сделать с отсутствующим ядром человек ничего не может, а отказ
-            // сохранить потерял бы его правку.
+
             VeilState.NodeCheck.Unavailable -> {
                 message = tr("Ядра нет, поэтому конфигурация не проверена.", "The core is not available, so this was not checked."); bad = false; node
             }
@@ -623,13 +578,11 @@ internal fun NodeEditorDialog(
                         readOnly = !editable,
                         textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                         shape = RoundedCornerShape(16.dp),
-                        // Поле сжимается, а не кнопки уезжают: на телевизоре и в
-                        // ландшафте экран ниже, чем JSON узла.
+
                         modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 120.dp, max = 360.dp),
                     )
                 } else {
-                    // Только чтение: не поле ввода, а прокручиваемый текст. В поле
-                    // пульт двигает курсор по JSON и не может выйти к кнопкам.
+
                     val textScroll = rememberScrollState()
                     Surface(
                         shape = RoundedCornerShape(16.dp),
@@ -663,7 +616,7 @@ internal fun NodeEditorDialog(
                 ) {
                     TextButton(modifier = Modifier.tvFocusRing(CircleShape), onClick = {
                         clipboard.setText(AnnotatedString(text))
-                        // Окно закрывает общие уведомления: отвечаем прямо в нём.
+
                         message = tr("Скопировано", "Copied"); bad = false
                     }) { Text(tr("Копировать", "Copy")) }
                     if (!editable) {
@@ -773,7 +726,6 @@ private fun SectionLabel(text: String) {
     )
 }
 
-/** URL подписки — это credential, целиком в интерфейсе его показывать нельзя. */
 private fun maskUrl(url: String): String {
     val tail = url.takeLast(4)
     return "${url.substringAfter("://").substringBefore('/')}/…$tail"

@@ -126,10 +126,6 @@ private val QR_HINTS: Map<DecodeHintType, Any> = mapOf(
     DecodeHintType.CHARACTER_SET to "UTF-8",
 )
 
-/**
- * Пробует источник несколькими способами: обычный бинаризатор, глобальный
- * (лучше на ровно освещённом экране) и в инверсии (светлый код на тёмном).
- */
 private fun MultiFormatReader.decodeAll(source: LuminanceSource, thorough: Boolean): String? {
     val attempts = buildList {
         add(BinaryBitmap(HybridBinarizer(source)))
@@ -146,7 +142,6 @@ private fun MultiFormatReader.decodeAll(source: LuminanceSource, thorough: Boole
     return null
 }
 
-/** QR со скриншота или фото из галереи. */
 private fun decodeImage(context: Context, uri: Uri): String? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
@@ -168,15 +163,6 @@ private fun decodeImage(context: Context, uri: Uri): String? {
     return reader.decodeAll(source, thorough = true)
 }
 
-/**
- * Полноэкранный сканер QR на camera2 + ZXing.
- *
- *  - превью center-crop без искажений, кадры для декодера ~1080p;
- *  - пока сканер открыт, экран зафиксирован в портрете: так рамка, кнопки и
- *    превью не разъезжаются при повороте телефона;
- *  - вспышка через запрос камеры, а не через setTorchMode;
- *  - можно выбрать скриншот с QR из галереи (разрешение камеры для этого не нужно).
- */
 @Composable
 actual fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
@@ -230,7 +216,6 @@ actual fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
         }
     }
 
-    // Портрет на время сканирования; прежнюю ориентацию возвращаем при закрытии.
     DisposableEffect(Unit) {
         val activity = context.findActivity()
         val previous = activity?.requestedOrientation
@@ -249,7 +234,7 @@ actual fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     ) {
         BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
             val frame: Dp = min(maxWidth * 0.72f, 320.dp)
-            // Рамка чуть выше центра — так под ней помещается подсказка.
+
             val frameShift: Dp = -(maxHeight * 0.04f)
 
             val controller = remember { mutableStateOf<QrCameraController?>(null) }
@@ -268,8 +253,7 @@ actual fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
-                // Камера должна освободиться сразу, а не после сборки мусора:
-                // иначе повторное открытие сканера остаётся с чёрным экраном.
+
                 DisposableEffect(Unit) {
                     onDispose {
                         controller.value?.stop()
@@ -280,7 +264,6 @@ actual fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
 
             ViewfinderOverlay(frame = frame, shift = frameShift, active = granted && error == null)
 
-            // Подсказка под рамкой.
             Text(
                 error ?: tr(
                     "Наведите на QR-код подписки или сервера",
@@ -358,7 +341,6 @@ actual fun QrScannerDialog(onResult: (String) -> Unit, onDismiss: () -> Unit) {
     }
 }
 
-/** Затемнение вокруг рамки и уголки, как в системной камере. */
 @Composable
 private fun ViewfinderOverlay(frame: Dp, shift: Dp, active: Boolean) {
     val corner by animateColorAsState(
@@ -384,7 +366,6 @@ private fun ViewfinderOverlay(frame: Dp, shift: Dp, active: Boolean) {
             blendMode = BlendMode.Clear,
         )
 
-        // Уголки: дуга скругления + короткие отрезки по сторонам.
         val stroke = 4.dp.toPx()
         val arm = side * 0.16f
         val inset = stroke / 2f
@@ -394,19 +375,19 @@ private fun ViewfinderOverlay(frame: Dp, shift: Dp, active: Boolean) {
         val b = top + side - inset
         val rr = radius - inset
         val path = Path().apply {
-            // левый верхний
+
             moveTo(l, t + rr + arm); lineTo(l, t + rr)
             arcTo(androidx.compose.ui.geometry.Rect(l, t, l + 2 * rr, t + 2 * rr), 180f, 90f, false)
             lineTo(l + rr + arm, t)
-            // правый верхний
+
             moveTo(r - rr - arm, t); lineTo(r - rr, t)
             arcTo(androidx.compose.ui.geometry.Rect(r - 2 * rr, t, r, t + 2 * rr), 270f, 90f, false)
             lineTo(r, t + rr + arm)
-            // правый нижний
+
             moveTo(r, b - rr - arm); lineTo(r, b - rr)
             arcTo(androidx.compose.ui.geometry.Rect(r - 2 * rr, b - 2 * rr, r, b), 0f, 90f, false)
             lineTo(r - rr - arm, b)
-            // левый нижний
+
             moveTo(l + rr + arm, b); lineTo(l + rr, b)
             arcTo(androidx.compose.ui.geometry.Rect(l, b - 2 * rr, l + 2 * rr, b), 90f, 90f, false)
             lineTo(l, b - rr - arm)
@@ -455,11 +436,6 @@ private fun PillButton(
     }
 }
 
-/**
- * Камера на camera2: превью в TextureView + кадры в ImageReader, декодирование
- * ZXing в фоновом потоке. Без Google Play Services — на устройстве они не нужны,
- * а Maven-репозиторий Google может быть недоступен.
- */
 private class QrCameraController(
     context: Context,
     private val textureView: TextureView,
@@ -471,8 +447,7 @@ private class QrCameraController(
     private val thread = HandlerThread("veil-qr").apply { start() }
     private val handler = Handler(thread.looper)
     private val mainHandler = Handler(Looper.getMainLooper())
-    // Подсказки ставим один раз: decode(bitmap, hints) пересоздаёт ридеры на
-    // каждом кадре, а decodeWithState переиспользует их.
+
     private val reader = MultiFormatReader().apply { setHints(QR_HINTS) }
     private var frameIndex = 0
     private var sensorOrientation = 90
@@ -510,10 +485,6 @@ private class QrCameraController(
         }
     }
 
-    /**
-     * Вспышку включаем флагом в повторяющемся запросе: CameraManager.setTorchMode
-     * не работает, пока камера открыта этим же приложением.
-     */
     fun setTorch(on: Boolean) {
         handler.post {
             val builder = requestBuilder ?: return@post
@@ -622,9 +593,7 @@ private class QrCameraController(
                                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
                                 )
                                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                                // Лёгкий зум: телефон можно держать дальше, где
-                                // автофокус ещё работает, а модули плотного кода
-                                // всё равно крупнее на кадре.
+
                                 if (android.os.Build.VERSION.SDK_INT >= 30) {
                                     zoomRatio?.let { set(CaptureRequest.CONTROL_ZOOM_RATIO, it) }
                                 }
@@ -651,8 +620,7 @@ private class QrCameraController(
         val image = runCatching { imageReader.acquireLatestImage() }.getOrNull() ?: return
         try {
             if (closed) return
-            // Больше ~12 кадров в секунду декодировать незачем: ZXing на слабом
-            // телефоне не успевает, а очередь ImageReader начинает копиться.
+
             val now = SystemClock.elapsedRealtime()
             if (now - lastFrameAt < 40L) return
             lastFrameAt = now
@@ -662,7 +630,7 @@ private class QrCameraController(
                 mainHandler.post { onCode(text) }
             }
         } catch (_: Throwable) {
-            // битый кадр — ждём следующий
+
         } finally {
             runCatching { image.close() }
         }
@@ -682,8 +650,7 @@ private class QrCameraController(
             buffer.rewind()
             buffer.get(data, 0, min(buffer.remaining(), data.size))
         } else {
-            // Y-плоскость лежит с выравниванием строк: копируем построчно,
-            // иначе картинка разъезжается и код не находится.
+
             var out = 0
             var y = 0
             while (y < height && out < data.size) {
@@ -697,10 +664,6 @@ private class QrCameraController(
             }
         }
 
-        // Код почти всегда в центре, под рамкой: декодируем центральный
-        // квадрат — меньше пикселей, быстрее и меньше ложных «находок» по краям.
-        // Каждый третий кадр смотрим кадр целиком (код у края или очень крупный),
-        // а через кадр — другим бинаризатором и в инверсии (светлый код на тёмном).
         val index = frameIndex++
         val side = (min(width, height) * 0.85f).toInt()
         val source: LuminanceSource = if (index % 3 == 2) {
@@ -721,11 +684,6 @@ private class QrCameraController(
         } ?: ids.firstOrNull()
     }
 
-    /**
-     * Превью — близко к соотношению сторон вида и не больше 1080p. Размеры камеры
-     * всегда «альбомные» (ширина > высоты), а вид в портрете — наоборот, поэтому
-     * сравниваем длинную сторону с короткой, а не width/height как есть.
-     */
     private fun choosePreviewSize(
         map: android.hardware.camera2.params.StreamConfigurationMap,
         viewWidth: Int,
@@ -738,7 +696,7 @@ private class QrCameraController(
         } else {
             16f / 9f
         }
-        // Шире 16:9 камера не даёт, а 4:3 на вытянутом экране обрезается сильнее.
+
         val targetRatio = min(viewRatio, 16f / 9f)
         val candidates = sizes.filter { it.width <= 1920 && it.height <= 1080 && it.height >= 480 }
             .ifEmpty { sizes }
@@ -748,11 +706,6 @@ private class QrCameraController(
         } ?: sizes.first()
     }
 
-    /**
-     * Кадры для ZXing — того же соотношения сторон, что и превью (чтобы рамка на
-     * экране совпадала с тем, что декодируется), и как можно ближе к 1080p:
-     * плотный vless-QR на 720p даёт ~3 пикселя на модуль и не читается.
-     */
     private fun chooseAnalysisSize(
         map: android.hardware.camera2.params.StreamConfigurationMap,
         preview: Size,
@@ -769,7 +722,6 @@ private class QrCameraController(
         } ?: Size(1280, 720)
     }
 
-    /** ~1.5× если камера умеет (API 30+), иначе без зума. */
     private fun chooseZoom(characteristics: CameraCharacteristics): Float? {
         if (android.os.Build.VERSION.SDK_INT < 30) return null
         val range = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) ?: return null
@@ -777,12 +729,6 @@ private class QrCameraController(
         return 1.5f.coerceIn(range.lower, range.upper)
     }
 
-    /**
-     * TextureView растягивает буфер камеры на весь вид. Камера сама поворачивает
-     * кадр под естественную ориентацию устройства, так что в портрете буфер
-     * 1920×1080 показывается как 1080×1920 — и сжимается под вытянутый экран.
-     * Здесь считаем матрицу center-crop: картинка заполняет вид без искажений.
-     */
     private fun configureTransform(viewWidth: Int, viewHeight: Int, preview: Size) {
         if (viewWidth <= 0 || viewHeight <= 0) return
         val rotation = textureView.display?.rotation ?: Surface.ROTATION_0
@@ -798,19 +744,16 @@ private class QrCameraController(
         val cy = vh / 2f
         val matrix = Matrix()
 
-        // Буфер уже повернут на ориентацию сенсора (под ROTATION_0). Его размеры
-        // в этой «естественной» ориентации:
         val sensorSideways = sensorOrientation % 180 != 0
         val naturalW = if (sensorSideways) preview.height.toFloat() else preview.width.toFloat()
         val naturalH = if (sensorSideways) preview.width.toFloat() else preview.height.toFloat()
-        // Повёрнутый на 90/270 дисплей меняет стороны контента местами.
+
         val displaySideways = displayDegrees % 180 != 0
         val contentW = if (displaySideways) naturalH else naturalW
         val contentH = if (displaySideways) naturalW else naturalH
 
         if (displaySideways) {
-            // Схема из Camera2Basic: вид → буфер со сменой сторон, center-crop,
-            // затем поворот против поворота дисплея.
+
             val viewRect = RectF(0f, 0f, vw, vh)
             val bufferRect = RectF(0f, 0f, preview.height.toFloat(), preview.width.toFloat())
             bufferRect.offset(cx - bufferRect.centerX(), cy - bufferRect.centerY())
@@ -832,7 +775,6 @@ private class QrCameraController(
         mainHandler.post { onError(message) }
     }
 
-    /** Идемпотентно: вызывается и из onDispose, и из onSurfaceTextureDestroyed. */
     fun stop() {
         closed = true
         requestBuilder = null

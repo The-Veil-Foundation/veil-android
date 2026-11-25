@@ -53,12 +53,6 @@ import dev.local.veil.core.Pairing
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/**
- * Единый лист «Добавить», как AddServerSheet на macOS: пользователь вставляет
- * что есть, лист сам понимает, подписка это или узлы, и говорит об этом до
- * нажатия. Подписка скачивается, пока лист открыт: ошибка видна на месте, а
- * вставленный текст не пропадает.
- */
 @Composable
 internal fun AddSheet(
     state: VeilState,
@@ -71,6 +65,22 @@ internal fun AddSheet(
     var name by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
+    var readingImage by remember { mutableStateOf(false) }
+    val pickQrImage = rememberQrImagePicker { result ->
+        readingImage = false
+        when (result) {
+            is QrImageResult.Decoded -> {
+                text = result.text.trim()
+                name = ""
+                error = null
+                dev.local.veil.core.AppLog.event("QR image decoded")
+            }
+            QrImageResult.Cancelled -> Unit
+            QrImageResult.NotFound -> error = tr("QR-код не найден. Обрежьте изображение вокруг кода и попробуйте снова.", "No QR code found. Crop the image around the code and try again.")
+            QrImageResult.TooLarge -> error = tr("Изображение слишком большое. Выберите файл до 16 МБ.", "Image is too large. Choose a file up to 16 MB.")
+            QrImageResult.Unreadable -> error = tr("Не удалось открыть изображение. Попробуйте PNG или JPEG.", "Could not open the image. Try PNG or JPEG.")
+        }
+    }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val tv = LocalTvMode.current
@@ -84,7 +94,7 @@ internal fun AddSheet(
 
     val pairing = remember(text) { Pairing.parse(text) != null }
     val kind = remember(text) { if (pairing) AddInput.Kind.Empty else AddInput.classify(text) }
-    val canAdd = !working && (pairing || kind is AddInput.Kind.Subscription || kind is AddInput.Kind.Servers)
+    val canAdd = !working && !readingImage && (pairing || kind is AddInput.Kind.Subscription || kind is AddInput.Kind.Servers)
 
     fun submit() {
         if (!canAdd) return
@@ -119,6 +129,7 @@ internal fun AddSheet(
 
         OutlinedTextField(
             value = text,
+            enabled = !working && !readingImage,
             onValueChange = {
                 text = it
                 error = null
@@ -223,12 +234,22 @@ internal fun AddSheet(
         if (onScan != null || onReceive != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (onScan != null) {
-                    SecondaryAction(AppIcons.Scan, tr("Сканировать QR", "Scan QR"), onScan, Modifier.weight(1f))
+                    SecondaryAction(AppIcons.Scan, tr("Сканировать QR", "Scan QR"), onScan, Modifier.weight(1f), enabled = !working && !readingImage)
                 }
                 if (onReceive != null) {
-                    SecondaryAction(AppIcons.Transfer, tr("С устройства", "From device"), onReceive, Modifier.weight(1f))
+                    SecondaryAction(AppIcons.Transfer, tr("С устройства", "From device"), onReceive, Modifier.weight(1f), enabled = !working && !readingImage)
                 }
             }
+        }
+
+        if (pickQrImage != null) {
+            SecondaryAction(
+                AppIcons.Document,
+                if (readingImage) tr("Читаю QR из изображения…", "Reading QR from image…") else tr("QR из изображения", "QR from image"),
+                onClick = { readingImage = true; error = null; pickQrImage() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !working && !readingImage,
+            )
         }
 
         if (onCancel != null) {
@@ -238,9 +259,10 @@ internal fun AddSheet(
 }
 
 @Composable
-private fun SecondaryAction(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier) {
+private fun SecondaryAction(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier, enabled: Boolean = true) {
     FilledTonalButton(
         onClick = onClick,
+        enabled = enabled,
         shape = CircleShape,
         modifier = modifier.height(52.dp),
     ) {
@@ -250,7 +272,6 @@ private fun SecondaryAction(icon: ImageVector, label: String, onClick: () -> Uni
     }
 }
 
-/** Строка «что мы поняли из вставки» — видно до нажатия «Добавить». */
 @Composable
 private fun Detection(kind: AddInput.Kind, pairing: Boolean) {
     val scheme = MaterialTheme.colorScheme

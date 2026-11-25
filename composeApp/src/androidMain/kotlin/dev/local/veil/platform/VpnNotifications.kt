@@ -70,12 +70,16 @@ internal object VpnNotifications {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setShowWhen(timer)
             .setUsesChronometer(timer)
-            .setRequestPromotedOngoing(Build.VERSION.SDK_INT >= 36 && (active || paused) && liveUpdates)
+            .setRequestPromotedOngoing(Build.VERSION.SDK_INT >= 36 && ongoing && liveUpdates)
 
-        if (paused && liveUpdates) builder.setShortCriticalText(tr("Пауза", "Paused"))
+        if (liveUpdates) {
+            when {
+                paused -> builder.setShortCriticalText(tr("Пауза", "Paused"))
+                status.phase == VpnPhase.CONNECTING -> builder.setShortCriticalText("VPN…")
+                active && !timer -> builder.setShortCriticalText("VPN")
+            }
+        }
 
-        // SystemUI renders the timer in both the notification and the Android 16 chip.
-        // No notification polling, fake progress, or hard-coded OEM extras are needed.
         if (timer) builder.setWhen(status.connectedSince)
         if (active || status.phase == VpnPhase.PAUSED) {
             builder.addAction(

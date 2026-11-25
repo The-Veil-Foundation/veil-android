@@ -202,7 +202,7 @@ class XrayConfigTest {
     @Test
     fun hysteria2IsNotBuildable() {
         val cfg = LinkParser.parse("hysteria2://pw@jp.example.com:443#JP")
-        // Конфиг собирается, но как freedom — подключать нельзя.
+
         assertEquals(ProxyProtocol.HYSTERIA2, cfg.proto)
         assertFalse(cfg.isUsable)
     }
@@ -308,7 +308,6 @@ class SubscriptionPayloadTest {
         val inbound = config["inbounds"]!!.jsonArray[0].jsonObject
         assertEquals("tun", inbound["protocol"]!!.jsonPrimitive.content)
 
-        // Маршрут панели (обход ntv.ru) должен остаться.
         val rules = config["routing"]!!.jsonObject["rules"]!!.jsonArray.map { it.jsonObject }
         assertTrue(rules.any { it["domain"]?.toString()?.contains("ntv.ru") == true }, "правило панели сохранено")
 

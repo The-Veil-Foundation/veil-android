@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/composeApp/libs/xray.aar"
-# Мост живёт в репозитории, чтобы релиз собирался на GitHub без соседних папок.
+
 BRIDGE="${XRAY_BRIDGE:-$ROOT/XrayBridge}"
 
 export ANDROID_HOME="$HOME/Android"

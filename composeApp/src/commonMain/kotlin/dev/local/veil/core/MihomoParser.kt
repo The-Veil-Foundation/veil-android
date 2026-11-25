@@ -1,16 +1,5 @@
 package dev.local.veil.core
 
-/**
- * Разбор Mihomo/Clash YAML.
- *
- * Панели, которые отдают Clash-профили, обычно присылают простой YAML: список
- * `proxies` с плоскими ключами и одним-двумя вложенными блоками (`ws-opts`,
- * `reality-opts`, `grpc-opts`). Полноценный YAML тут не нужен — разбираем ровно
- * этот подмножество, чтобы не тянуть парсер в общий код.
- *
- * Группы (`proxy-groups`) и правила (`rules`) пока не импортируются: сначала
- * узлы, чтобы подписка хотя бы работала.
- */
 object MihomoParser {
 
     fun parse(text: String): SubscriptionPayload.Body? {
@@ -32,7 +21,7 @@ object MihomoParser {
             if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
 
             val indent = indentOf(raw)
-            if (indent <= proxiesIndent) break // секция кончилась
+            if (indent < proxiesIndent || (indent == proxiesIndent && !trimmed.startsWith("- "))) break
 
             if (trimmed.startsWith("- ")) {
                 if (itemIndent < 0) itemIndent = indent
@@ -41,7 +30,7 @@ object MihomoParser {
                 current?.let { items += it }
                 current = LinkedHashMap()
                 path.clear()
-                // Первая пара ключ-значение идёт сразу после дефиса.
+
                 readPair(trimmed.removePrefix("- ").trim(), itemIndent + 2, current, path)
                 continue
             }
@@ -73,15 +62,12 @@ object MihomoParser {
                 skipped = skipped,
             )
         }
-        return SubscriptionPayload.Body.Ok(SubscriptionPayload.Format.MIHOMO, nodes, skipped)
+        val groups = MihomoGroups.parse(text, nodes)
+        return SubscriptionPayload.Body.Ok(SubscriptionPayload.Format.MIHOMO, nodes, skipped + groups.skipped, groups.groups)
     }
 
     private fun indentOf(line: String): Int = line.indexOfFirst { it != ' ' }.let { if (it < 0) 0 else it }
 
-    /**
-     * Складывает пару в плоскую карту с путём: `ws-opts.headers.Host`.
-     * Пустое значение означает начало вложенного блока.
-     */
     private fun readPair(
         text: String,
         indent: Int,
@@ -121,7 +107,7 @@ object MihomoParser {
             "vmess" -> ProxyProtocol.VMESS
             "trojan" -> ProxyProtocol.TROJAN
             "ss", "shadowsocks" -> ProxyProtocol.SHADOWSOCKS
-            else -> return null // hysteria2, tuic, anytls, ssh и прочее — не для Xray
+            else -> return null
         }
 
         val server = raw["server"] ?: return null

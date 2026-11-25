@@ -7,23 +7,13 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
-/* ------------------------------------------------------------------ */
-/* Маршрутизация — порт Routing.swift из veil-macos                     */
-/* ------------------------------------------------------------------ */
-
-/**
- * Куда правило отправляет трафик.
- *
- * SERVER и GROUP позволяют пустить два приложения через два разных узла
- * одновременно: правило называет конкретный узел или группу, а не «прокси».
- */
 @Serializable
 enum class TargetKind { PROXY, DIRECT, BLOCK, SERVER, GROUP }
 
 @Serializable
 data class RuleTarget(
     val kind: TargetKind = TargetKind.PROXY,
-    /** id узла или группы для kind = SERVER / GROUP. */
+
     val id: String? = null,
 ) {
     val title: String
@@ -35,7 +25,6 @@ data class RuleTarget(
             TargetKind.GROUP -> "Group"
         }
 
-    /** Тег выхода в профиле sing-box. */
     fun tag(): String = when (kind) {
         TargetKind.PROXY -> ProfileTags.DEFAULT_SELECTOR
         TargetKind.DIRECT -> ProfileTags.DIRECT
@@ -44,14 +33,12 @@ data class RuleTarget(
         TargetKind.GROUP -> ProfileTags.group(id.orEmpty())
     }
 
-    /** Выход, если узлы и группы сведены к одному прокси. */
     fun xrayTag(): String = when (kind) {
         TargetKind.DIRECT -> "direct"
         TargetKind.BLOCK -> "block"
         else -> "proxy"
     }
 
-    /** Цель называет то, что строится только полным профилем. */
     val needsProfile: Boolean
         get() = (kind == TargetKind.SERVER || kind == TargetKind.GROUP) && !id.isNullOrBlank()
 
@@ -67,22 +54,9 @@ data class RuleTarget(
     }
 }
 
-/** К какой стороне соединения применяются адресные матчеры правила. */
 @Serializable
 enum class RuleDirection { DESTINATION, SOURCE }
 
-/**
- * Одно упорядоченное правило маршрутизации.
- *
- * Правило срабатывает, когда совпала *каждая* заполненная группа матчеров, а
- * группа — когда совпал *любой* её элемент (AND из OR, как в sing-box).
- * `invert` переворачивает результат.
- *
- * `domains` и `ips` хранятся в Xray-синтаксисе (`domain:`, `keyword:`,
- * `regexp:`, `geosite:`, `geoip:`) — так говорят ссылки, панели и остальные
- * клиенты. [MatcherSyntax] раскладывает их обратно для sing-box.
- */
-/** Domain and IP entries of a community list are alternatives, not an AND match. */
 fun communityRoutingRules(id: String, name: String, target: RuleTarget, domains: List<String>, ips: List<String>): List<RoutingRule> = buildList {
     if (domains.isNotEmpty()) add(RoutingRule(id = "$id:domains", name = name, target = target, domains = domains))
     if (ips.isNotEmpty()) add(RoutingRule(id = "$id:ips", name = name, target = target, ips = ips))
@@ -94,49 +68,36 @@ data class RoutingRule(
     val name: String = "",
     val target: RuleTarget = RuleTarget(),
     val enabled: Boolean = true,
-    // Адресные матчеры
+
     val domains: List<String> = emptyList(),
     val ips: List<String> = emptyList(),
-    /** "443", "1000-2000" или список через запятую. */
+
     val port: String = "",
     val direction: RuleDirection = RuleDirection.DESTINATION,
-    /**
-     * Приложения. На macOS это имена процессов, на Android — имена пакетов
-     * (`package_name` в sing-box). Работают только на sing-box.
-     */
+
     val processNames: List<String> = emptyList(),
-    // Дополнительные матчеры sing-box
-    /** "" | "tcp" | "udp" */
+
     val network: String = "",
-    /** Определённые сниффингом: http, tls, quic, dns, bittorrent… */
+
     val protocols: List<String> = emptyList(),
-    /** Явные теги rule-set. */
+
     val ruleSets: List<String> = emptyList(),
-    /** "" | "Rule" | "Global" | "Direct" */
+
     val clashMode: String = "",
     val invert: Boolean = false,
 ) {
-    /** Правило не матчит ничего — сборщики его пропускают, а не ловят всё подряд. */
+
     val hasMatcher: Boolean
         get() = domains.isNotEmpty() || ips.isNotEmpty() || processNames.isNotEmpty() ||
             ruleSets.isNotEmpty() || protocols.isNotEmpty() || network.isNotBlank() ||
             clashMode.isNotBlank() || port.isNotBlank()
 
-    /** Правило выполнимо только на sing-box. */
     val needsProcessMatching: Boolean
         get() = processNames.isNotEmpty()
 
-    /**
-     * Правило называет свои адреса или домены, а не приложение.
-     *
-     * Это решает, может ли обход локальной сети из пресета обогнать правило.
-     * «Всё, что шлёт Slack» не должно утащить LAN-трафик Slack в туннель, а
-     * «192.168.8.0/24 через этот узел» — как раз фраза про LAN.
-     */
     val namesItsOwnDestinations: Boolean
         get() = direction == RuleDirection.DESTINATION && (domains.isNotEmpty() || ips.isNotEmpty())
 
-    /** Обычные диапазоны адресов назначения, без `geoip:` и `ext:`. */
     val destinationCIDRs: List<String>
         get() = if (direction != RuleDirection.DESTINATION) {
             emptyList()
@@ -144,13 +105,6 @@ data class RoutingRule(
             ips.filter { !it.startsWith("geoip:") && !it.startsWith("ext:") }
         }
 
-    /**
-     * Поле Xray routing; null — Xray выразить правило не может (процессы,
-     * invert, только sing-box-матчеры) или в нём нет ни одного матчера.
-     * Такие правила выкидываются, а не расширяются молча.
-     *
-     * [outboundTag] — уже разрешённый выход; [balancer] — это тег балансировщика.
-     */
     fun xrayRule(
         outboundTag: String = target.xrayTag(),
         balancer: Boolean = false,
@@ -161,7 +115,7 @@ data class RoutingRule(
         val matchesSomething = domains.isNotEmpty() || ips.isNotEmpty() ||
             xrayPort != null || network.isNotBlank()
         if (!matchesSomething) return null
-        // Протоколы и rule-set Xray не понимает: правило с ними без них стало бы шире.
+
         if (protocols.isNotEmpty() || ruleSets.isNotEmpty() || clashMode.isNotBlank()) return null
         return buildJsonObject {
             put("type", "field")
@@ -182,19 +136,12 @@ data class RoutingRule(
     }
 
     companion object {
-        /** Есть ли среди правил такие, что называют конкретный узел или группу. */
+
         fun needsProfile(rules: List<RoutingRule>): Boolean =
             rules.any { it.enabled && it.target.needsProfile }
     }
 }
 
-/**
- * Встроенные пресеты, как в v2rayN/Nekoray. Каждый даёт упорядоченный список
- * правил. Пресеты с `geosite:`/`geoip:` подтягивают rule-set (sing-box) или
- * .dat-базы (Xray).
- *
- * Имена констант не меняются: по ним настройки лежат на диске.
- */
 @Serializable
 enum class RoutingPreset {
     GLOBAL,
@@ -213,24 +160,14 @@ enum class RoutingPreset {
             CUSTOM -> "Custom"
         }
 
-    /** Нужны ли пресету geo-категории (.dat у Xray, rule-set у sing-box). */
     val needsGeoAssets: Boolean
         get() = this == BYPASS_CHINA || this == BYPASS_RU
 
-    /** Отправляет ли пресет частные диапазоны напрямую. */
     val bypassesLAN: Boolean
         get() = this == BYPASS_LAN || this == BYPASS_CHINA || this == BYPASS_RU
 
-    /** Встроенные правила целиком: охрана и собственные правила пресета. */
     fun builtInRules(blockAds: Boolean): List<RoutingRule> = guardRules(blockAds) + presetRules()
 
-    /**
-     * Правила, которые должны стоять раньше пользовательских.
-     *
-     * Пользовательское правило обычно называет приложение, а приложение ходит и
-     * в LAN, и в интернет. Если бы оно обгоняло обход частных диапазонов,
-     * принтер и NAS уехали бы в туннель.
-     */
     fun guardRules(blockAds: Boolean): List<RoutingRule> = buildList {
         if (blockAds) {
             add(
@@ -258,7 +195,6 @@ enum class RoutingPreset {
         }
     }
 
-    /** Мнение самого пресета — применяется после пользовательских правил. */
     fun presetRules(): List<RoutingRule> = when (this) {
         GLOBAL, BYPASS_LAN, CUSTOM -> emptyList()
         BYPASS_CHINA -> listOf(
@@ -275,8 +211,7 @@ enum class RoutingPreset {
                 id = "preset:ru-sites",
                 name = "RU gov & category direct",
                 target = RuleTarget.Direct,
-                // Национальные зоны дописаны к категориям: без geo-базы на Xray
-                // категории вырезаются, и пресет не должен превращаться в пустышку.
+
                 domains = listOf(
                     "geosite:category-gov-ru",
                     "geosite:category-ru",
@@ -290,15 +225,9 @@ enum class RoutingPreset {
     }
 
     companion object {
-        /**
-         * Режимы, которые показывает выбор режима. «Китай напрямую» и «Россия
-         * напрямую» убраны: они путали людей, а Россию теперь закрывает
-         * готовый список «Россия внутри». Константы остаются, чтобы старые
-         * настройки читались; [AppSettings.migrated] переводит их на BYPASS_LAN.
-         */
+
         val selectable = listOf(GLOBAL, BYPASS_LAN, CUSTOM)
 
-        /** То, что значит `geoip:private`, перечисленное явно. */
         val PRIVATE_CIDRS = listOf(
             "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
             "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
@@ -306,10 +235,6 @@ enum class RoutingPreset {
     }
 }
 
-/**
- * Откуда качать geoip.dat / geosite.dat для Xray.
- * sing-box с 1.12 .dat не читает и использует rule-set — см. [RuleSetRef].
- */
 @Serializable
 enum class GeoAssetSource {
     LOYALSOILDIER,
@@ -341,10 +266,6 @@ enum class GeoAssetSource {
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Группы серверов — порт ServerGroup.swift / GroupQuery.swift          */
-/* ------------------------------------------------------------------ */
-
 @Serializable
 enum class GroupKind {
     SELECTOR,
@@ -357,7 +278,6 @@ enum class GroupKind {
         get() = if (this == SELECTOR) "Всегда выбранный участник" else "Замер и выбор быстрейшего"
 }
 
-/** Критерии автоматической группы. Пустой запрос — все узлы. */
 @Serializable
 data class GroupQuery(
     val sourceIds: List<String> = emptyList(),
@@ -379,8 +299,10 @@ data class ServerGroup(
     val testUrl: String = "https://www.gstatic.com/generate_204",
     val interval: String = "3m",
     val tolerance: Int = 50,
+    val source: String? = null,
+    val sourceName: String? = null,
 ) {
-    /** Участники в порядке отображения; пропавшие узлы молча выпадают. */
+
     fun members(servers: List<ProxyConfig>): List<ProxyConfig> {
         val byId = servers.associateBy { it.id }
         val picked = memberIds.mapNotNull { byId[it] }
@@ -405,13 +327,9 @@ data class ServerGroup(
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Заметки к узлам — порт NodeAnnotation.swift                          */
-/* ------------------------------------------------------------------ */
-
 @Serializable
 data class NodeAnnotation(
-    /** Своё имя вместо названия из подписки. */
+
     val nameOverride: String = "",
     val note: String = "",
     val tags: List<String> = emptyList(),

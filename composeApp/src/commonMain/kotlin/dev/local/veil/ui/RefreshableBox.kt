@@ -17,11 +17,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 
-/**
- * Обёртка «потянуть, чтобы обновить». На телевизоре жестов нет, поэтому
- * pull-to-refresh отключается и остаётся обычный контейнер: обновление
- * вызывается кнопкой или автоматически.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RefreshableBox(

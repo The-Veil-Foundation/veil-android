@@ -26,8 +26,7 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // На Android TV edge-to-edge даёт лишние системные отступы и иногда
-        // оставляет Compose в промежуточном состоянии при старте лаунчера.
+
         if (!isTelevision) enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
@@ -35,8 +34,6 @@ class MainActivity : ComponentActivity() {
         acceptLink(intent)
         setContent { App(container) }
 
-        // У телевизора нет шторки уведомлений; запрос разрешения только
-        // задерживает первый кадр и может выглядеть как зависание запуска.
         if (!isTelevision && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -51,11 +48,6 @@ class MainActivity : ComponentActivity() {
         acceptLink(intent)
     }
 
-    /**
-     * veil://pair?u=<адрес приёма>: телефон открыл страницу приставки и нажал
-     * «Открыть в Veil». Берём только настоящий адрес приёма в локальной сети,
-     * дальше приложение само спросит, что отправить.
-     */
     private fun acceptLink(intent: Intent?) {
         val data = intent?.data ?: return
         if (intent.action != Intent.ACTION_VIEW || data.scheme != "veil" || data.host != "pair") return

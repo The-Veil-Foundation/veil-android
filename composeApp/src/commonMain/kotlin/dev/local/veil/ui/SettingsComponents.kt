@@ -39,18 +39,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/*
- * Единый «сегментированный» стиль настроек — тот же, что в bottom sheet сервера:
- * каждая строка это отдельный скруглённый сегмент surfaceContainerHigh,
- * между строками зазор 2.dp, у крайних радиус 24.dp, у внутренних — 6.dp.
- * Никаких тонких линий-разделителей: роль разделителя играет сам зазор.
- */
-
-/* ------------------------------------------------------------------ */
-/* Контейнеры                                                          */
-/* ------------------------------------------------------------------ */
-
-/** Группа настроек: подпись с иконкой и «остров» из сегментов. */
 @Composable
 internal fun SettingsGroup(
     title: String,
@@ -87,11 +75,6 @@ internal fun SettingsGroup(
     }
 }
 
-/**
- * Сегментированный список как в bottom sheet: строки — отдельные скруглённые
- * сегменты с зазором 2.dp; крайние получают большой радиус, внутренние — малый.
- * Этот «разделитель» и есть зазор между сегментами.
- */
 @Composable
 internal fun SegmentedGroup(
     modifier: Modifier = Modifier,
@@ -117,11 +100,6 @@ internal fun SegmentedGroup(
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Строки                                                              */
-/* ------------------------------------------------------------------ */
-
-/** Переключатель: подпись, описание и Switch справа. */
 @Composable
 internal fun SegmentSwitch(
     title: String,
@@ -139,7 +117,7 @@ internal fun SegmentSwitch(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = if (LocalTvMode.current) null else onCheckedChange,
             thumbContent = {
                 AppIcon(if (checked) AppIcons.Check else AppIcons.Close, modifier = Modifier.size(16.dp))
             },
@@ -147,7 +125,6 @@ internal fun SegmentSwitch(
     }
 }
 
-/** Переход в другой экран или действие: подпись, описание и шеврон. */
 @Composable
 internal fun SegmentAction(
     title: String,
@@ -170,7 +147,6 @@ internal fun SegmentAction(
     }
 }
 
-/** Вариант выбора: подпись и ряд чипов под ней. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SegmentChoice(
@@ -208,7 +184,6 @@ internal fun SegmentChoice(
     }
 }
 
-/** Только информация: подпись слева, значение справа. */
 @Composable
 internal fun SegmentInfo(label: String, value: String) {
     Row(
@@ -230,7 +205,6 @@ internal fun SegmentInfo(label: String, value: String) {
     }
 }
 
-/** Поле ввода внутри сегмента. */
 @Composable
 internal fun SegmentInput(
     value: String,
@@ -250,16 +224,11 @@ internal fun SegmentInput(
     )
 }
 
-/** Вариант для [SegmentChoice]. */
 internal class SegmentOption(
     val label: String,
     val selected: Boolean,
     val onClick: () -> Unit,
 )
-
-/* ------------------------------------------------------------------ */
-/* Внутреннее                                                          */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun SegmentRow(
@@ -314,10 +283,6 @@ private fun SegmentCaption(text: String) {
     )
 }
 
-/* ------------------------------------------------------------------ */
-/* Чип                                                                 */
-/* ------------------------------------------------------------------ */
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChipSmall(text: String, selected: Boolean, onClick: () -> Unit) {
@@ -361,10 +326,6 @@ fun ChipSmall(text: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/**
- * Поле ввода без контрастной рамки, как в листе «Добавить»: тональная
- * подложка, рамка появляется только в фокусе.
- */
 @Composable
 internal fun veilFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,

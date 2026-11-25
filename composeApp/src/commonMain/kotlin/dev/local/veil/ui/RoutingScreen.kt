@@ -57,34 +57,19 @@ import dev.local.veil.platform.PlatformBackHandler
 
 private enum class RoutingPage { HOME, RULES, COMMUNITY, DNS, GROUPS }
 
-/**
- * Маршрутизация: пресет, правила, группы серверов и DNS.
- * Порт RoutingView / RulesView / DNSView / GroupsView из veil-ios.
- */
 @Composable
 fun RoutingScreen(
     state: VeilState,
     modifier: Modifier = Modifier,
-    // Позиция главной страницы держится снаружи: переход в правила или DNS
-    // и обратно не должен отматывать её наверх.
+
     homeScroll: ScrollState = rememberScrollState(),
 ) {
     var page by remember { mutableStateOf(RoutingPage.HOME) }
 
-    PlatformBackHandler(enabled = page != RoutingPage.HOME) { page = RoutingPage.HOME }
-
-    AnimatedContent(
-        targetState = page,
-        transitionSpec = {
-            if (targetState.ordinal > initialState.ordinal) {
-                (slideInHorizontally(tween(180)) { it / 3 } + fadeIn(tween(180))) togetherWith
-                    (slideOutHorizontally(tween(180)) { -it / 4 } + fadeOut(tween(150)))
-            } else {
-                (slideInHorizontally(tween(180)) { -it / 3 } + fadeIn(tween(180))) togetherWith
-                    (slideOutHorizontally(tween(180)) { it / 4 } + fadeOut(tween(150)))
-            }
-        },
-        label = "routing-page",
+    PredictiveNavigation(
+        page = page,
+        previous = if (page != RoutingPage.HOME) RoutingPage.HOME else null,
+        onBack = { page = RoutingPage.HOME },
     ) { current ->
         when (current) {
             RoutingPage.HOME -> RoutingHome(state, modifier, homeScroll, onOpen = { page = it })
@@ -95,10 +80,6 @@ fun RoutingScreen(
         }
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* Главная                                                             */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun RoutingHome(
@@ -259,10 +240,6 @@ private fun RoutingHome(
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Готовые списки                                                      */
-/* ------------------------------------------------------------------ */
-
 private fun communityCategoryTitle(category: CommunityCategory): String = when (category) {
     CommunityCategory.REGION -> tr("Регионы", "Regions")
     CommunityCategory.CONTENT -> tr("Категории", "Categories")
@@ -412,10 +389,6 @@ private fun CommunityRow(
         onCheckedChange = onCheckedChange,
     )
 }
-
-/* ------------------------------------------------------------------ */
-/* Правила                                                             */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun RulesPage(state: VeilState, modifier: Modifier, onBack: () -> Unit) {
@@ -592,10 +565,6 @@ private fun ruleSummary(rule: RoutingRule, state: VeilState): String {
     val invert = if (rule.invert) tr("НЕ ", "NOT ") else ""
     return "→ $target · $invert$matcher"
 }
-
-/* ------------------------------------------------------------------ */
-/* DNS                                                                 */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun DnsPage(state: VeilState, modifier: Modifier, onBack: () -> Unit) {
@@ -825,10 +794,6 @@ private fun DnsServerDialog(
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Группы                                                              */
-/* ------------------------------------------------------------------ */
-
 @Composable
 private fun GroupsPage(state: VeilState, modifier: Modifier, onBack: () -> Unit) {
     val settings = state.settings
@@ -935,10 +900,6 @@ private fun GroupDialog(
         }
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* Общие части                                                         */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun PageHeader(title: String, subtitle: String, onBack: () -> Unit) {
@@ -1073,18 +1034,8 @@ internal fun splitLines(raw: String): List<String> =
         .map { it.trim() }
         .filter { it.isNotEmpty() }
 
-/* ------------------------------------------------------------------ */
-/* Готовые списки — заметная карточка на главной                       */
-/* ------------------------------------------------------------------ */
-
-/** Популярные списки, которые можно включить прямо с главной. */
 private val FEATURED_LISTS = listOf("ru-inside")
 
-/**
- * Готовые списки — самый простой способ настроить маршрут: включил «YouTube»,
- * и его сайты пошли через VPN. Поэтому это не строка среди прочих, а
- * отдельная карточка с быстрыми переключателями и понятным описанием.
- */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CommunityFeature(state: VeilState, onOpen: () -> Unit) {

@@ -3,8 +3,10 @@ package dev.local.veil.platform
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import dev.local.veil.core.compatibleApkIndex
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -14,10 +16,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/**
- * Обновления из GitHub Releases: раз в проверку берём latest, сравниваем
- * версии, качаем APK и отдаём системе установщик.
- */
 class AndroidUpdateService(private val context: Context) : UpdateService {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -36,17 +34,11 @@ class AndroidUpdateService(private val context: Context) : UpdateService {
             val version = release.tag.removePrefix("v").removePrefix("V")
             if (!isNewer(version, currentVersion)) return@runCatching null
 
-            val apk = release.assets
-                .filter { it.name.endsWith(".apk", ignoreCase = true) }
-                .sortedBy { asset ->
-                    when {
-                        asset.name.contains("universal", ignoreCase = true) -> 0
-                        asset.name.contains("arm64", ignoreCase = true) -> 1
-                        asset.name.contains("x86_64", ignoreCase = true) -> 2
-                        else -> 3
-                    }
-                }
-                .firstOrNull() ?: return@runCatching null
+            val apkIndex = compatibleApkIndex(
+                release.assets.map { it.name },
+                Build.SUPPORTED_ABIS.toList(),
+            ) ?: return@runCatching null
+            val apk = release.assets[apkIndex]
 
             AppRelease(
                 version = version,
@@ -102,7 +94,6 @@ class AndroidUpdateService(private val context: Context) : UpdateService {
         val file = File(path)
         require(file.exists()) { "Файл обновления не найден" }
 
-        // Android 8+: установка из неизвестного источника включается отдельно.
         if (!context.packageManager.canRequestPackageInstalls()) {
             val settings = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -141,7 +132,7 @@ class AndroidUpdateService(private val context: Context) : UpdateService {
         return try {
             when (connection.responseCode) {
                 200 -> connection.inputStream.bufferedReader().use { it.readText() }
-                // Репозиторий есть, но релизов ещё не публиковали.
+
                 404 -> error("Релизов на GitHub пока нет")
                 else -> error("GitHub ответил HTTP ${connection.responseCode}")
             }
@@ -150,7 +141,6 @@ class AndroidUpdateService(private val context: Context) : UpdateService {
         }
     }
 
-    /** Сравнение версий по числам: 0.10.0 новее 0.9.9. */
     private fun isNewer(candidate: String, current: String): Boolean {
         fun parts(value: String) = value.split('-', '+').first()
             .split('.').map { it.toIntOrNull() ?: 0 }

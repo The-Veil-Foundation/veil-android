@@ -28,7 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -40,13 +41,8 @@ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 
-/** true, когда приложение запущено на телевизоре: меняет навигацию и фокус. */
 val LocalTvMode = staticCompositionLocalOf { false }
 
-/**
- * Яркая рамка вокруг элемента, получившего фокус с пульта. Обычная ripple
- * на телевизоре почти не видна с дивана, поэтому фокус обводим акцентом.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TvIndicationProvider(enabled: Boolean, content: @Composable () -> Unit) {
@@ -56,9 +52,7 @@ fun TvIndicationProvider(enabled: Boolean, content: @Composable () -> Unit) {
     }
     val accent = MaterialTheme.colorScheme.primary
     val indication = remember(accent) { TvIndication(accent) }
-    // Кнопки, плитки и пункты навигации Material рисуют свою ripple, а не
-    // LocalIndication, и фокус у неё — едва заметная дымка. С дивана не
-    // видно, где стоит пульт, поэтому на телевизоре фокус заливается ярко.
+
     val ripple = remember(accent) {
         RippleConfiguration(
             color = accent,
@@ -78,11 +72,6 @@ fun TvIndicationProvider(enabled: Boolean, content: @Composable () -> Unit) {
     )
 }
 
-/**
- * Подсветка фокуса через [IndicationNodeFactory]: новый clickable принимает
- * только такую, со старым Indication приложение на телевизоре падало при
- * первом же кликабельном элементе.
- */
 private class TvIndication(private val accent: Color) : IndicationNodeFactory {
     override fun create(interactionSource: InteractionSource): DelegatableNode =
         TvIndicationNode(interactionSource, accent)
@@ -119,48 +108,51 @@ private class TvIndicationNode(
         if (focused) drawRoundRect(color = accent.copy(alpha = 0.16f), cornerRadius = radius)
         drawContent()
         if (focused) {
-            drawRoundRect(color = accent, cornerRadius = radius, style = Stroke(width = 2.5.dp.toPx()))
+            val inset = 4.dp.toPx()
+            drawRoundRect(
+                color = accent,
+                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                size = androidx.compose.ui.geometry.Size((size.width - 2 * inset).coerceAtLeast(0f), (size.height - 2 * inset).coerceAtLeast(0f)),
+                cornerRadius = CornerRadius(32.dp.toPx()),
+                style = Stroke(width = 2.dp.toPx()),
+            )
         }
     }
 }
 
-/**
- * Обводка фокуса для компонентов Material (кнопки, плитки, пункты навигации):
- * они рисуют свою ripple и не видят [LocalIndication]. На телефоне ничего не
- * делает. Ставится до кликабельного модификатора, чтобы видеть его фокус.
- */
 fun Modifier.tvFocusRing(shape: Shape = RoundedCornerShape(16.dp)): Modifier = composed {
     if (!LocalTvMode.current) return@composed this
     var focused by remember { mutableStateOf(false) }
     val ring = MaterialTheme.colorScheme.onSurface
-    val scale by animateFloatAsState(if (focused) 1.03f else 1f, tween(120), label = "tv-focus")
+    val reduceMotion = LocalReduceMotion.current
+    val scale by animateFloatAsState(
+        if (focused && !reduceMotion) 1.03f else 1f,
+        if (reduceMotion) androidx.compose.animation.core.snap() else tween(120),
+        label = "tv-focus",
+    )
     this
         .graphicsLayer { scaleX = scale; scaleY = scale }
         .onFocusChanged { focused = it.hasFocus }
         .border(if (focused) 3.dp else 0.dp, if (focused) ring else Color.Transparent, shape)
 }
 
-/**
- * Lets the remote scroll a block that has nothing focusable inside, such as a
- * list of details: the block itself takes focus, and up/down scroll it until
- * its edge, then hand the key on so focus can leave.
- */
 fun Modifier.tvKeyScroll(scroll: androidx.compose.foundation.ScrollState, shape: Shape = RoundedCornerShape(16.dp)): Modifier = composed {
     if (!LocalTvMode.current) return@composed this
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val step = with(LocalDensity.current) { 160.dp.toPx() }
     var focused by remember { mutableStateOf(false) }
     val ring = MaterialTheme.colorScheme.onSurface
-    this.onFocusChanged { focused = it.hasFocus }
+    this.onFocusChanged { focused = it.isFocused }
         .border(if (focused) 2.dp else 0.dp, if (focused) ring else Color.Transparent, shape)
         .onPreviewKeyEvent { event ->
             if (event.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            val step = 160f
+            if (!focused) return@onPreviewKeyEvent false
             when (event.key) {
                 androidx.compose.ui.input.key.Key.DirectionDown -> scroll.canScrollForward.also {
-                    if (it) scope.launch { scroll.animateScrollBy(step) }
+                    if (it) scope.launch { scroll.scrollBy(step) }
                 }
                 androidx.compose.ui.input.key.Key.DirectionUp -> scroll.canScrollBackward.also {
-                    if (it) scope.launch { scroll.animateScrollBy(-step) }
+                    if (it) scope.launch { scroll.scrollBy(-step) }
                 }
                 else -> false
             }

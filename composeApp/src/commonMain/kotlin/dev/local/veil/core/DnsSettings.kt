@@ -2,10 +2,6 @@ package dev.local.veil.core
 
 import kotlinx.serialization.Serializable
 
-/* ------------------------------------------------------------------ */
-/* DNS — порт DNSSettings.swift из veil-ios (упрощённый под Android)    */
-/* ------------------------------------------------------------------ */
-
 @Serializable
 enum class DnsServerKind {
     LOCAL,
@@ -31,7 +27,6 @@ enum class DnsServerKind {
     val needsServer: Boolean get() = this != LOCAL
     val needsPath: Boolean get() = this == HTTPS || this == H3
 
-    /** Схема для Xray `dns.servers[].address`. */
     fun address(server: String): String = when (this) {
         LOCAL -> "localhost"
         UDP -> server
@@ -62,10 +57,10 @@ data class DnsRule(
     val enabled: Boolean = true,
     val serverTag: String = "",
     val domains: List<String> = emptyList(),
-    /** Пакеты приложений (на macOS — имена процессов). */
+
     val processNames: List<String> = emptyList(),
     val ruleSets: List<String> = emptyList(),
-    /** Отвечать NXDOMAIN вместо маршрутизации запроса. */
+
     val reject: Boolean = false,
     val invert: Boolean = false,
 ) {
@@ -79,7 +74,7 @@ data class DnsSettings(
     val servers: List<DnsServerEntry> = defaultServers(),
     val rules: List<DnsRule> = defaultRules(),
     val finalTag: String = "dns-remote",
-    /** prefer_ipv4 | prefer_ipv6 | ipv4_only | ipv6_only */
+
     val strategy: String = "prefer_ipv4",
     val reverseMapping: Boolean = true,
     val fakeIpEnabled: Boolean = false,
@@ -92,7 +87,6 @@ data class DnsSettings(
             ?: servers.firstOrNull()?.tag
             ?: "dns-local"
 
-    /** Чинит полупустые записи, из-за которых ядро не стартует. */
     fun sanitized(): DnsSettings {
         val repaired = servers.mapNotNull { entry ->
             var e = entry

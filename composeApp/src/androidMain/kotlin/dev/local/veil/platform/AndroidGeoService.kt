@@ -26,7 +26,7 @@ class AndroidGeoService(private val dir: File) : GeoService {
             val staging = File(dir, "geo-download")
             try {
                 check(staging.mkdirs() || staging.isDirectory)
-                // Keep the installed pair intact until BOTH downloads have completed.
+
                 downloadTo(source.geoipUrl(customGeoip), File(staging, "geoip.dat"), onProgress)
                 downloadTo(source.geositeUrl(customGeosite), File(staging, "geosite.dat"), onProgress)
                 currentCoroutineContext().ensureActive()
@@ -114,7 +114,6 @@ class AndroidGeoService(private val dir: File) : GeoService {
     companion object { private const val MAX_BYTES = 128L * 1024 * 1024 }
 }
 
-/** GeoIPList/GeoSiteList contain repeated length-delimited field 1 entries. */
 internal fun validateGeoFile(file: File) {
     java.io.RandomAccessFile(file, "r").use { input ->
         check(input.length() > 0) { "Пустая геобаза" }

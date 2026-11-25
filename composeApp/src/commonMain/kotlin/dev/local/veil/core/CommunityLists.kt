@@ -1,10 +1,5 @@
 package dev.local.veil.core
 
-/**
- * Готовый список доменов и подсетей из проекта `itdoginfo/allow-domains`.
- * Пользователь включает «Россия внутри» вместо того, чтобы вставлять тысячу
- * доменов в правило: список скачивается и кэшируется сам.
- */
 data class CommunityList(
     val id: String,
     val title: String,
@@ -14,7 +9,7 @@ data class CommunityList(
     val ipv4Path: String? = null,
     val ipv6Path: String? = null,
 ) {
-    /** Заголовок под текущий язык. */
+
     fun title(language: AppLanguage): String =
         if (language == AppLanguage.EN) title else titleRu
 }
@@ -25,7 +20,6 @@ enum class CommunityCategory {
     SERVICE,
 }
 
-/** Каталог списков в порядке отображения. */
 object CommunityCatalog {
     const val REPOSITORY = "itdoginfo/allow-domains"
     const val BRANCH = "main"
@@ -35,7 +29,7 @@ object CommunityCatalog {
         "https://raw.githubusercontent.com/$REPOSITORY/$BRANCH/$path"
 
     val all: List<CommunityList> = listOf(
-        // Российские сайты и подсети, которые должны идти напрямую.
+
         CommunityList("ru-inside", "Russia inside", "Россия внутри", CommunityCategory.REGION, "Russia/inside-raw.lst"),
     )
 

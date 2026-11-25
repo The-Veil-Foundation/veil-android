@@ -14,13 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Android-аналог `PacketTunnelProvider`.
- *
- * Тот же путь пакета, что на iOS: system routing → TUN → Xray `tun` inbound
- * (gVisor) → outbound → сервер. Интерфейс создаёт `VpnService.establish()`,
- * дескриптор уходит в Xray через `xray.tun.fd`.
- */
 class VeilVpnService : VpnService() {
 
     companion object {
@@ -97,7 +90,7 @@ class VeilVpnService : VpnService() {
                     putExtra(EXTRA_CONFIG, configJson)
                     putExtra(EXTRA_SERVER, serverName)
                     if (engine != null) putExtra(EXTRA_ENGINE, engine.name)
-                    // Новые настройки раздельного туннеля применяются при пересоздании TUN.
+
                     if (splitMode != null && splitPackages != null) {
                         putExtra(EXTRA_SPLIT_MODE, splitMode.name)
                         putExtra(EXTRA_SPLIT_PACKAGES, splitPackages.toTypedArray())
@@ -112,14 +105,12 @@ class VeilVpnService : VpnService() {
             )
         }
 
-        /** Переключает паузу: из уведомления и из приложения. */
         fun togglePause(context: Context) {
             context.startService(
                 Intent(context, VeilVpnService::class.java).apply { action = ACTION_PAUSE },
             )
         }
 
-        /** Changes presentation without restarting the VPN or creating an idle service. */
         fun updateNotification(context: Context, enabled: Boolean) {
             if (status.value.phase !in setOf(VpnPhase.CONNECTED, VpnPhase.PAUSED)) return
             context.startService(
@@ -135,16 +126,10 @@ class VeilVpnService : VpnService() {
     private var geoDirectory: String = ""
     private var connectedAt: Long = 0L
 
-    /**
-     * Копия TUN-дескриптора для ядра. gVisor закрывает fd при остановке,
-     * поэтому мастер-дескриптор всегда остаётся у сервиса, а ядро получает dup.
-     */
     private var coreFd: ParcelFileDescriptor? = null
 
-    /** Ядро, которым поднят текущий туннель. */
     private var engine: CoreEngine = CoreEngine.XRAY
 
-    /** Запускает ядро на дубликате TUN: перезапуск не убивает интерфейс. */
     private fun startCore(configJson: String, core: CoreEngine = engine): Result<Unit> {
         val master = tun ?: return Result.failure(IllegalStateException("TUN не создан"))
         runCatching { coreFd?.close() }
@@ -154,13 +139,16 @@ class VeilVpnService : VpnService() {
         if (core == CoreEngine.SING_BOX) {
             runCatching { singbox.Singbox.install(applicationContext) }
         }
+        val sharing = dev.local.veil.sharing.AndroidInternetSharing.get(applicationContext)
+        val sharedConfig = runCatching { sharing.attach(configJson, core) }.getOrElse { return Result.failure(it) }
         return when (core) {
-            CoreEngine.SING_BOX -> SingboxBridge.start(configJson, child.fd, geoDirectory, 0)
-            else -> XrayBridge.start(configJson, child.fd, geoDirectory, 0)
-        }
+            CoreEngine.SING_BOX -> SingboxBridge.start(sharedConfig, child.fd, geoDirectory, 0)
+            else -> XrayBridge.start(sharedConfig, child.fd, geoDirectory, 0)
+        }.onSuccess { sharing.onCoreReady() }
     }
 
-    private fun stopCores() {
+    private fun stopCores(reconnecting: Boolean = false) {
+        dev.local.veil.sharing.AndroidInternetSharing.get(applicationContext).onCoreStopping(reconnecting)
         runCatching { XrayBridge.stop() }
         runCatching { SingboxBridge.stop() }
     }
@@ -170,7 +158,6 @@ class VeilVpnService : VpnService() {
         else -> XrayBridge.version()
     }
 
-    /** Параметры TUN: нужны, чтобы пересоздать интерфейс при смене узла. */
     private data class TunnelParams(
         val mtu: Int,
         val ipv6: Boolean,
@@ -181,10 +168,6 @@ class VeilVpnService : VpnService() {
 
     private var params: TunnelParams? = null
 
-    /**
-     * Создаёт TUN. При смене узла интерфейс пересоздаётся: ядро (gVisor)
-     * закрывает дескриптор при остановке, и старый fd больше не годится.
-     */
     private fun openTun(params: TunnelParams): ParcelFileDescriptor? {
         val builder = Builder()
             .setSession("Veil")
@@ -199,10 +182,6 @@ class VeilVpnService : VpnService() {
 
         params.dns.forEach { builder.addDnsServer(it) }
 
-        // Android не позволяет смешивать «разрешённые» и «запрещённые» приложения:
-        // addAllowedApplication после addDisallowedApplication кидает исключение,
-        // а раньше оно глоталось через runCatching — режим «Только» не работал.
-        // Само приложение в режиме INCLUDE и так мимо туннеля (его нет в списке).
         val others = params.splitPackages.filter { it != packageName }
         when (params.splitMode) {
             SplitMode.OFF -> runCatching { builder.addDisallowedApplication(packageName) }
@@ -212,8 +191,7 @@ class VeilVpnService : VpnService() {
             }
             SplitMode.INCLUDE -> {
                 val added = others.count { pkg -> runCatching { builder.addAllowedApplication(pkg) }.isSuccess }
-                // Пустой список allowed означает «все приложения» — это петля для ядра
-                // и обратное тому, что просил пользователь.
+
                 if (added == 0) {
                     throw IllegalStateException("Режим «Только»: не выбрано ни одного установленного приложения")
                 }
@@ -223,13 +201,10 @@ class VeilVpnService : VpnService() {
         return builder.establish()
     }
 
-    /** Имя узла, к которому подключены сейчас: его показывает уведомление. */
     private var activeServerName: String = ""
 
-    /** На паузе ядро и TUN остановлены, приложения ходят напрямую. */
     private var paused = false
 
-    /** Последний конфиг/имя/режим уведомления — чтобы возобновить после паузы. */
     private var lastConfig: String = ""
     private var lastLiveNotification: Boolean = true
     private var notificationDismissed = false
@@ -373,8 +348,7 @@ class VeilVpnService : VpnService() {
     }
 
     private fun reload(configJson: String, serverName: String, newEngine: CoreEngine? = null) {
-        // На паузе VPN-интерфейса нет: просто запоминаем новый узел,
-        // туннель поднимется при возобновлении, сервис не убиваем.
+
         if (paused) {
             if (configJson.isNotBlank()) {
                 lastConfig = configJson
@@ -394,13 +368,12 @@ class VeilVpnService : VpnService() {
         publish(VpnStatus(VpnPhase.CONNECTING, serverName = serverName))
         notifyState()
         try {
-            stopCores()
+            stopCores(reconnecting = true)
             runCatching { coreFd?.close() }
             coreFd = null
             runCatching { tun?.close() }
             tun = null
 
-            // Свежий TUN: ядро закрыло дескриптор при остановке, старый уже мёртв.
             val tunnelParams = params
             val fresh = tunnelParams?.let { openTun(it) }
             if (fresh == null) {
@@ -415,8 +388,7 @@ class VeilVpnService : VpnService() {
                     fail("${core.label} не запустился: ${it.message}")
                     return
                 }
-            // Время сессии не обнуляем: смена узла не должна выглядеть
-            // как новое подключение.
+
             if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
             activeServerName = serverName
             lastConfig = configJson
@@ -436,14 +408,6 @@ class VeilVpnService : VpnService() {
         }
     }
 
-    /**
-     * Пауза: полностью отпускаем VPN-интерфейс и останавливаем ядро.
-     *
-     * Раньше TUN оставался поднятым, и весь трафик уходил в него без ядра —
-     * интернет «умирал» до полного отключения. Теперь при паузе интерфейс
-     * закрывается: приложения ходят напрямую, а сервис/уведомление остаются
-     * жить в фоне. На возобновлении TUN создаётся заново.
-     */
     private fun pause() {
         if (paused) return
         paused = true
@@ -456,7 +420,6 @@ class VeilVpnService : VpnService() {
         notifyState()
     }
 
-    /** Возобновление: заново создаём TUN и поднимаем ядро с последним конфигом. */
     private fun resume() {
         if (!paused) return
         val tunnelParams = params
@@ -524,7 +487,6 @@ class VeilVpnService : VpnService() {
         super.onDestroy()
     }
 
-    /** State changes only; the notification chronometer is rendered by SystemUI. */
     private fun notifyState() {
         if (notificationDismissed) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

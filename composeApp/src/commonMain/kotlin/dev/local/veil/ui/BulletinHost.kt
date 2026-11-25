@@ -12,7 +12,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** Latest message wins; cancelling showSnackbar also removes the previous message. */
 @Composable
 internal fun BulletinHost(
     bulletin: Bulletin?,
@@ -32,6 +31,5 @@ internal fun BulletinHost(
         dismiss(current.id)
     }
 
-    // SnackbarHost handles accessibility announcements and recommended timeouts.
     SnackbarHost(hostState = hostState, modifier = modifier.widthIn(max = 560.dp))
 }

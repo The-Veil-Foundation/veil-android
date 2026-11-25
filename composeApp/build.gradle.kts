@@ -1,23 +1,11 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-/*
- * Единственный источник версии — файл VERSION в корне репозитория
- * (например 0.1.2 или 0.2.0-beta.1). Из него берутся versionName, versionCode,
- * версия десктопного пакета и константа AppVersion для кода приложения
- * (User-Agent по умолчанию, «О приложении»).
- */
 val appVersion: String = rootProject.file("VERSION").readText().trim()
     .also { require(Regex("""\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?""").matches(it)) { "VERSION: ожидается X.Y.Z[-pre], получено '$it'" } }
 
-/** X.Y.Z без суффикса. */
 val appVersionCore: String = appVersion.substringBefore('-')
 
-/**
- * versionCode растёт вместе с версией: X·1 000 000 + Y·10 000 + Z·100 + стадия.
- * Предрелиз (-alpha, -beta.2…) получает 0–98 по номеру в суффиксе, релиз — 99,
- * поэтому 0.2.0-beta.3 < 0.2.0 < 0.2.1-alpha.
- */
 val appVersionCode: Int = run {
     val (major, minor, patch) = appVersionCore.split('.').map { it.toInt() }
     val pre = appVersion.substringAfter('-', "")
@@ -33,7 +21,6 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
 }
 
-/** Kotlin-константа с версией для общего кода. */
 val generateAppVersion by tasks.registering {
     val out = layout.buildDirectory.dir("generated/appVersion/commonMain/kotlin")
     val version = appVersion
@@ -79,21 +66,21 @@ kotlin {
                 implementation(compose.components.resources)
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.coroutines.core)
-                // M3 Expressive: морфинг фигур из официальной библиотеки graphics-shapes
+
                 implementation("androidx.graphics:graphics-shapes:1.1.0")
+
+                implementation("androidx.collection:collection:1.5.0")
             }
         }
         val androidMain by getting {
             dependencies {
+                implementation("dev.rikka.shizuku:api:13.1.5")
+                implementation("dev.rikka.shizuku:provider:13.1.5")
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.core.ktx)
-                // QR: ZXing из Maven Central (Google Maven недоступен),
-                // камера — нативный camera2, без лишних зависимостей
+
                 implementation(libs.zxing.core)
-                // Ядро собирается Scripts/build-xray-android.sh. Пока AAR нет,
-                // проект всё равно компилируется — подключение честно откажет.
-                // Единый gomobile-AAR: Xray + sing-box libbox в одном go.Seq.
-                // Старый xray.aar нельзя держать рядом — будет дубль go.Seq.
+
                 val coreAar = file("libs/veil-core.aar")
                 val xrayAar = file("libs/xray.aar")
                 when {
@@ -116,6 +103,8 @@ kotlin {
 
 android {
     namespace = "dev.local.veil"
+    buildFeatures { aidl = true }
+    sourceSets["main"].aidl.srcDir("src/androidMain/aidl")
     compileSdk = 36
 
     defaultConfig {
@@ -136,7 +125,7 @@ android {
 
     signingConfigs {
         create("release") {
-            // В CI ключ приходит секретами; локально релиз подписывается debug-ключом.
+
             val store = System.getenv("VEIL_KEYSTORE")
             if (!store.isNullOrBlank()) {
                 storeFile = file(store)
@@ -147,23 +136,19 @@ android {
         }
     }
 
-    // Сплиты по ABI включаются только для релиза: -PabiSplits.
-    // Ядро собрано под arm64-v8a и x86_64, поэтому 32-битные сборки не делаем.
     splits {
         abi {
             isEnable = providers.gradleProperty("abiSplits").isPresent
             reset()
-            include("arm64-v8a", "x86_64")
-            // Универсальный APK содержит оба ядра (~130 МБ) и не нужен:
-            // у всех реальных устройств arm64-v8a, x86_64 — только для эмулятора.
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
+
             isUniversalApk = false
         }
     }
 
     buildTypes {
         debug {
-            // Если задан релизный ключ, debug-сборка подписывается им же:
-            // иначе её нельзя поставить поверх релизного APK.
+
             signingConfig = if (!System.getenv("VEIL_KEYSTORE").isNullOrBlank()) {
                 signingConfigs.getByName("release")
             } else {
@@ -171,8 +156,7 @@ android {
             }
         }
         release {
-            // R8 вырезает неиспользуемый код (иконки Material, корутины, Compose)
-            // и переименовывает классы: dex на порядок меньше.
+
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -191,11 +175,7 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
 
         jniLibs {
-            // Go-ядро (libgojni.so) занимает 61 МБ и не сжимается само по себе:
-            // Android хранит .so в APK без сжатия. Legacy packaging упаковывает
-            // его deflate (61 → ~21 МБ), а установщик распаковывает при установке.
-            // Плата — чуть более долгая установка и место на диске, зато APK
-            // для скачивания втрое меньше.
+
             useLegacyPackaging = true
         }
     }
@@ -207,7 +187,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Dmg, TargetFormat.Msi)
             packageName = "Veil"
-            // jpackage принимает только X.Y.Z, а DMG — ещё и мажор не ниже 1.
+
             packageVersion = appVersionCore.split('.').let { (major, minor, patch) ->
                 "${maxOf(major.toInt(), 1)}.$minor.$patch"
             }

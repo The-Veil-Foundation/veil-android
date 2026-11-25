@@ -12,7 +12,7 @@
  */
 package dev.local.veil.ui
 
-import androidx.graphics.shapes.TransformResult
+import androidx.collection.FloatFloatPair
 import androidx.compose.ui.geometry.Offset
 import androidx.graphics.shapes.CornerRounding
 import androidx.graphics.shapes.RoundedPolygon
@@ -23,10 +23,6 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** LoadingIndicator subset of AndroidX MaterialShapes, with the original control points.
- * Source: androidx/compose/material3/material3/MaterialShapes.kt.
- * Kept separate from decorative app shapes so their geometry stays unchanged.
- */
 internal object LoadingShapes {
     private data class Vertex(val point: Offset, val rounding: CornerRounding = CornerRounding.Unrounded)
     private fun vertex(x: Float, y: Float, radius: Float = 0f) =
@@ -67,14 +63,14 @@ internal object LoadingShapes {
         listOf(
             polygon(listOf(vertex(.193f, .277f, .053f), vertex(.176f, .055f, .053f)), 10),
             RoundedPolygon.star(9, innerRadius = .8f, rounding = CornerRounding(.5f))
-                .transformed { x, y -> TransformResult(y, -x) }.normalized(),
+                .transformed { x, y -> FloatFloatPair(y, -x) }.normalized(),
             polygon(listOf(vertex(.500f, -.009f, .172f), vertex(1.030f, .365f, .164f), vertex(.828f, .970f, .169f)), 1, true),
             polygon(listOf(vertex(.961f, .039f, .426f), vertex(1.001f, .428f), vertex(1.000f, .609f, 1f)), 2, true),
             RoundedPolygon.star(8, innerRadius = .8f, rounding = CornerRounding(.15f)).normalized(),
             polygon(listOf(vertex(1.237f, 1.236f, .258f), vertex(.500f, .918f, .233f)), 4),
             RoundedPolygon.circle().transformed { x, y ->
                 val s = .70710677f
-                TransformResult((x + y * .64f) * s, (y * .64f - x) * s)
+                FloatFloatPair((x + y * .64f) * s, (y * .64f - x) * s)
             }.normalized(),
         )
     }
