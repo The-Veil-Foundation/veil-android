@@ -5,35 +5,30 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.local.veil.core.AppLanguage
 
-/**
- * Текущий язык интерфейса. `SYSTEM` разрешается один раз при старте в
- * конкретный язык, поэтому внутри приложения здесь всегда `RU` или `EN`.
- */
 val LocalLanguage = staticCompositionLocalOf { AppLanguage.RU }
 
-/**
- * Глобальное зеркало языка для строк, которые живут вне композиции:
- * форматтеров байт, подписей перечислений и буллетинов состояния.
- */
 object AppLocale {
     var language: AppLanguage = AppLanguage.RU
 }
 
-/** Выбирает русскую или английскую строку под текущий язык. */
 fun tr(ru: String, en: String): String =
-    if (AppLocale.language == AppLanguage.EN) en else ru
+    if (AppLocale.language == AppLanguage.RU) ru
+    else dev.local.veil.ui.translations.Translations.translate(en, AppLocale.language)
 
-/** Публикует выбранный язык для композиции и для [tr]. */
 @Composable
 fun ProvideLanguage(language: AppLanguage, content: @Composable () -> Unit) {
     AppLocale.language = language
-    CompositionLocalProvider(LocalLanguage provides language, content = content)
+    CompositionLocalProvider(
+        LocalLanguage provides language,
+        androidx.compose.ui.platform.LocalLayoutDirection provides
+            if (language == AppLanguage.AR) androidx.compose.ui.unit.LayoutDirection.Rtl
+            else androidx.compose.ui.unit.LayoutDirection.Ltr,
+        content = content,
+    )
 }
 
-/** Язык системы, если пользователь не выбрал конкретный. */
 expect fun systemLanguage(): AppLanguage
 
-/** Подписи способа замера задержки. */
 fun pingModeTitle(mode: dev.local.veil.platform.PingMode): String = when (mode) {
     dev.local.veil.platform.PingMode.REAL -> tr("Реальный", "Real")
     else -> mode.label
@@ -57,7 +52,6 @@ fun pingModeHint(mode: dev.local.veil.platform.PingMode): String = when (mode) {
         )
 }
 
-/** Подписи пресетов маршрутизации — тексты macOS (RoutingPreset.title/subtitle). */
 fun routingPresetTitle(preset: dev.local.veil.core.RoutingPreset): String = when (preset) {
     dev.local.veil.core.RoutingPreset.GLOBAL -> tr("Всё через прокси", "Global")
     dev.local.veil.core.RoutingPreset.BYPASS_LAN -> tr("Кроме локальной сети", "Bypass LAN")
@@ -102,7 +96,6 @@ fun ruleTargetTitle(target: dev.local.veil.core.RuleTarget): String = when (targ
 fun dnsKindTitle(kind: dev.local.veil.core.DnsServerKind): String =
     if (kind == dev.local.veil.core.DnsServerKind.LOCAL) tr("Системный", "System") else kind.title
 
-/** Подписи темы оформления. */
 fun appearanceTitle(appearance: dev.local.veil.core.Appearance): String = when (appearance) {
     dev.local.veil.core.Appearance.SYSTEM -> tr("Системная", "System")
     dev.local.veil.core.Appearance.LIGHT -> tr("Светлая", "Light")

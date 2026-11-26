@@ -3,12 +3,7 @@ package dev.local.veil.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -20,7 +15,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -29,41 +23,34 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.local.veil.core.ProxyConfig
 import dev.local.veil.platform.VpnPhase
 import dev.local.veil.platform.VpnStatus
-import kotlinx.coroutines.delay
 
-/**
- * Логотип Veil — открытый защитный контур из Figma.
- * Цвета берутся из темы, поэтому знак подстраивается под системную палитру.
- */
 @Composable
 fun VeilMark(
     size: androidx.compose.ui.unit.Dp = 36.dp,
@@ -115,7 +102,35 @@ private fun rightShieldPath(): androidx.compose.ui.graphics.Path =
         close()
     }
 
-/** Крупная статус-карточка: состояние, трафик, таймер, кнопка. */
+private fun Modifier.shieldPattern(color: Color, container: Color): Modifier = drawWithCache {
+    val left = leftShieldPath()
+    val right = rightShieldPath()
+    val artworkSize = minOf(size.width * .43f, 156.dp.toPx())
+    val textScrim = Brush.horizontalGradient(
+        0f to container,
+        .48f to container,
+        .80f to container.copy(alpha = 0f),
+    )
+    onDrawBehind {
+        fun shield(x: Float, y: Float, scaleFactor: Float, angle: Float, alpha: Float) {
+            translate(size.width * x, size.height * y) {
+                rotate(angle, pivot = Offset.Zero) {
+                    scale(artworkSize * scaleFactor / 106f, pivot = Offset.Zero) {
+                        translate(-66.25f, -67.575f) {
+                            drawPath(left, color.copy(alpha = alpha))
+                            drawPath(right, color.copy(alpha = alpha))
+                        }
+                    }
+                }
+            }
+        }
+        shield(.96f, .19f, 1f, 18f, .12f)
+        shield(.72f, .43f, .58f, -12f, .08f)
+        shield(.98f, .62f, .40f, 18f, .10f)
+        drawRect(textScrim)
+    }
+}
+
 @Composable
 fun StatusCard(
     status: VpnStatus,
@@ -128,8 +143,6 @@ fun StatusCard(
     val checking = checkingServer != null
     val shown = checkingServer ?: server
 
-    // Время берём из connectedSince, а не считаем локально: иначе таймер
-    // обнуляется, когда карточка уезжает из списка или приложение сворачивают.
     val seconds = if (status.connectedSince > 0 && now > 0) {
         ((now - status.connectedSince) / 1000).coerceAtLeast(0).toInt()
     } else {
@@ -138,37 +151,38 @@ fun StatusCard(
 
     val connected = status.isConnected
     val working = checking || status.phase == VpnPhase.CONNECTING
+    val reduceMotion = LocalReduceMotion.current || LocalTvMode.current
+    val scheme = MaterialTheme.colorScheme
 
     val container by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.errorContainer
+            connected -> scheme.primaryContainer
+            else -> scheme.secondaryContainer
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(220),
         label = "status-bg",
     )
     val content by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.onErrorContainer
+            connected -> scheme.onPrimaryContainer
+            else -> scheme.onSecondaryContainer
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(220),
         label = "status-fg",
     )
 
-    // Экспрессивная форма: карточка «раскрывается» при подключении, быстро.
     val big by animateFloatAsState(
         targetValue = if (connected) 44f else 32f,
-        animationSpec = tween(180),
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else VeilMotion.defaultSpatial,
         label = "status-corner",
     )
     val small by animateFloatAsState(
         targetValue = if (connected) 24f else 32f,
-        animationSpec = tween(180),
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else VeilMotion.defaultSpatial,
         label = "status-corner-small",
     )
-    val lift by animateDpAsState(
-        targetValue = if (connected) 6.dp else 0.dp,
-        animationSpec = tween(180),
-        label = "status-lift",
-    )
-
     val cardShape = RoundedCornerShape(
         topStart = big.dp,
         topEnd = big.dp,
@@ -180,11 +194,14 @@ fun StatusCard(
         color = container,
         contentColor = content,
         shape = cardShape,
-        shadowElevation = lift,
+        shadowElevation = 0.dp,
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.shieldPattern(content, container).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(
                     text = when {
                         checking -> tr("Проверяем сервер…", "Checking server…")
@@ -194,45 +211,40 @@ fun StatusCard(
                         status.phase == VpnPhase.ERROR -> tr("Ошибка", "Error")
                         else -> tr("Не защищено", "Unprotected")
                     },
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
-                AnimatedVisibility(
-                    visible = connected,
-                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
-                ) {
-                    Text(
-                        text = formatDuration(seconds),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                if (working) ExpressiveLoader(diameter = 28.dp, color = content)
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = shown?.let { "${it.proto.wire.uppercase()} · ${it.endpoint}" } ?: "—",
+                    text = shown?.let {
+                        if (connected) "${it.proto.wire.uppercase()} · ${formatDuration(seconds)}"
+                        else "${it.proto.wire.uppercase()} · ${it.endpoint}"
+                    } ?: tr("Выберите сервер ниже", "Choose a server below"),
                     style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
 
             AnimatedVisibility(
                 visible = connected,
-                enter = expandVertically(tween(180)) + fadeIn(),
-                exit = shrinkVertically(tween(180)) + fadeOut(),
+                enter = if (reduceMotion) androidx.compose.animation.EnterTransition.None else expandVertically(spring(dampingRatio = .85f, stiffness = 700f)) + fadeIn(),
+                exit = if (reduceMotion) androidx.compose.animation.ExitTransition.None else shrinkVertically() + fadeOut(),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SpeedChip(label = "↓", bytesPerSecond = status.downlinkSpeed)
-                    SpeedChip(label = "↑", bytesPerSecond = status.uplinkSpeed)
+                    SpeedChip(download = true, bytesPerSecond = status.downlinkSpeed)
+                    SpeedChip(download = false, bytesPerSecond = status.uplinkSpeed)
                 }
             }
 
@@ -244,20 +256,17 @@ fun StatusCard(
                 else -> tr("Подключить", "Connect")
             }
 
-            Button(
+            ExpressiveActionButton(
                 onClick = onToggle,
                 enabled = !working,
-                shape = MaterialTheme.shapes.large,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp)
-                    .tvFocusRing(MaterialTheme.shapes.large),
+                active = connected,
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 AnimatedContent(
                     targetState = label,
                     transitionSpec = {
-                        (fadeIn(tween(180)) + scaleIn(initialScale = 0.85f))
+                        if (reduceMotion) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                        else (fadeIn(tween(180)) + scaleIn(initialScale = 0.85f))
                             .togetherWith(fadeOut(tween(180)) + scaleOut(targetScale = 0.85f))
                     },
                     label = "button-label",
@@ -269,13 +278,11 @@ fun StatusCard(
                                 color = MaterialTheme.colorScheme.onPrimary,
                             )
                         } else {
-                            AppIcon(
-                                icon = if (connected) AppIcons.Shield else AppIcons.Power,
-                                modifier = Modifier.size(20.dp),
-                            )
+                            VeilMark(size = 32.dp, background = androidx.compose.ui.graphics.Color.Transparent,
+                                foreground = androidx.compose.material3.LocalContentColor.current)
                         }
                         Spacer(Modifier.size(8.dp))
-                        Text(text, fontWeight = FontWeight.Bold)
+                        Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -283,10 +290,6 @@ fun StatusCard(
     }
 }
 
-/**
- * Компактная панель статуса: та же кнопка включения, но одной строкой.
- * Появляется, когда список серверов прокручен и большая карточка свёрнута.
- */
 @Composable
 fun CompactStatusBar(
     status: VpnStatus,
@@ -306,19 +309,27 @@ fun CompactStatusBar(
         0
     }
 
+    val scheme = MaterialTheme.colorScheme
+    val reduceMotion = LocalReduceMotion.current || LocalTvMode.current
     val container by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHigh,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.errorContainer
+            connected -> scheme.primaryContainer
+            else -> scheme.surfaceContainerHigh
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(180),
         label = "compact-bg",
     )
     val content by animateColorAsState(
-        if (connected) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(180),
+        when {
+            status.phase == VpnPhase.ERROR -> scheme.onErrorContainer
+            connected -> scheme.onPrimaryContainer
+            else -> scheme.onSurface
+        },
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.snap() else tween(180),
         label = "compact-fg",
     )
-    val shape = Md3Shapes.card
+    val shape = MaterialTheme.shapes.extraLarge
 
     Surface(
         color = container,
@@ -328,16 +339,17 @@ fun CompactStatusBar(
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
-            Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Вместо точки — форма: перетекает из круга в «печенье», когда туннель поднят.
-            StatusShape(connected = connected, working = working)
-            Spacer(Modifier.size(10.dp))
+            if (working) {
+                ExpressiveLoader(diameter = 36.dp, color = content)
+                Spacer(Modifier.size(10.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     text = shown?.name ?: tr("Сервер не выбран", "No server selected"),
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -358,21 +370,21 @@ fun CompactStatusBar(
                     },
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (connected) {
-                Text(
-                    text = formatSpeed(status.downlinkSpeed),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(end = 10.dp),
-                )
+                Column(Modifier.padding(end = 8.dp)) {
+                    SpeedChip(download = true, bytesPerSecond = status.downlinkSpeed)
+                    SpeedChip(download = false, bytesPerSecond = status.uplinkSpeed)
+                }
             }
             FilledIconButton(
                 onClick = onToggle,
                 enabled = !working,
                 shape = CircleShape,
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(48.dp),
             ) {
                 if (working) {
                     CircularProgressIndicator(
@@ -381,40 +393,36 @@ fun CompactStatusBar(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                 } else {
-                    AppIcon(
-                        icon = if (connected) AppIcons.Shield else AppIcons.Power,
-                        contentDescription = if (connected) tr("Отключить", "Disconnect") else tr("Подключить", "Connect"),
-                        modifier = Modifier.size(20.dp),
-                    )
+                    VeilMark(size = 36.dp, background = androidx.compose.ui.graphics.Color.Transparent,
+                        foreground = androidx.compose.material3.LocalContentColor.current)
                 }
             }
         }
     }
 }
 
-/** Скорость с плавным набором значения. */
 @Composable
-private fun SpeedChip(label: String, bytesPerSecond: Long) {
-    val animated by animateFloatAsState(
-        targetValue = bytesPerSecond.toFloat(),
-        animationSpec = tween(180),
-        label = "speed-$label",
-    )
+private fun SpeedChip(download: Boolean, bytesPerSecond: Long) {
     Surface(
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.45f),
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
-        Text(
-            text = "$label ${formatSpeed(animated.toLong())}",
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            AppIcon(if (download) AppIcons.Download else AppIcons.Upload,
+                contentDescription = if (download) tr("Загрузка", "Download") else tr("Отдача", "Upload"),
+                modifier = Modifier.size(16.dp))
+            Text(
+            text = formatSpeed(bytesPerSecond.coerceAtLeast(0)),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
         )
+        }
     }
 }
 
-/** Пинг: цвет зависит от задержки. */
 @Composable
 fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
     val scheme = MaterialTheme.colorScheme
@@ -426,7 +434,7 @@ fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
         ms < 300 -> scheme.tertiaryContainer to scheme.onTertiaryContainer
         else -> scheme.secondaryContainer to scheme.onSecondaryContainer
     }
-    // Цвет плавно перетекает, когда замер закончился или пинг изменился.
+
     val bg by animateColorAsState(bgTarget, label = "ping-bg")
     val fg by animateColorAsState(fgTarget, label = "ping-fg")
     Surface(shape = RoundedCornerShape(10.dp), color = bg, contentColor = fg) {
@@ -458,72 +466,13 @@ fun PingPill(ms: Int?, measured: Boolean, pinging: Boolean) {
     }
 }
 
-/**
- * Буллетин — всплывающее сообщение внизу экрана вместо баннера в списке.
- * Появляется пружинно, исчезает сам, тап закрывает досрочно.
- */
-@Composable
-fun BulletinHost(
-    bulletin: Bulletin?,
-    onDismiss: (Long) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // Держим последнее непустое значение, иначе текст исчезнет до конца анимации.
-    var last by remember { mutableStateOf<Bulletin?>(null) }
-    if (bulletin != null) last = bulletin
-    val shown = last
-
-    AnimatedVisibility(
-        visible = bulletin != null,
-        enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it },
-        exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it },
-        modifier = modifier,
-    ) {
-        val current = shown ?: return@AnimatedVisibility
-        LaunchedEffect(current.id) {
-            delay(if (current.kind == BulletinKind.ERROR) 6000 else 3200)
-            onDismiss(current.id)
-        }
-
-        val scheme = MaterialTheme.colorScheme
-        val (bg, fg, icon) = when (current.kind) {
-            BulletinKind.SUCCESS -> Triple(scheme.primaryContainer, scheme.onPrimaryContainer, AppIcons.Check)
-            BulletinKind.ERROR -> Triple(scheme.errorContainer, scheme.onErrorContainer, AppIcons.Danger)
-            BulletinKind.INFO -> Triple(scheme.secondaryContainer, scheme.onSecondaryContainer, AppIcons.Info)
-        }
-
-        Surface(
-            onClick = { onDismiss(current.id) },
-            shape = MaterialTheme.shapes.large,
-            color = bg,
-            contentColor = fg,
-            shadowElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                AppIcon(icon, modifier = Modifier.size(20.dp))
-                Text(
-                    text = current.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-    }
-}
-
 fun formatBytes(bytes: Long): String {
     val kb = 1024.0
     val mb = kb * 1024
     val gb = mb * 1024
     val tb = gb * 1024
     fun scaled(value: Double, unit: String): String {
-        // Одна цифра после запятой, пока она что-то значит: «12,4 ГБ», но «240 ГБ».
+
         val text = if (value < 100) {
             val tenths = kotlin.math.round(value * 10).toLong()
             val separator = if (AppLocale.language == dev.local.veil.core.AppLanguage.EN) "." else ","
@@ -542,7 +491,6 @@ fun formatBytes(bytes: Long): String {
     }
 }
 
-/** Русское множественное число: 1 день, 2 дня, 5 дней. */
 fun ruPlural(n: Long, one: String, few: String, many: String): String {
     val mod100 = n % 100
     val mod10 = n % 10
@@ -554,7 +502,6 @@ fun ruPlural(n: Long, one: String, few: String, many: String): String {
     }
 }
 
-/** Сколько осталось до конца подписки: «37 дней», «5 ч», «истекла». */
 fun formatRemaining(epochSeconds: Long, now: Long = currentTimeMillis()): String {
     val seconds = epochSeconds - now / 1000
     if (seconds <= 0) return tr("истекла", "expired")
@@ -564,7 +511,6 @@ fun formatRemaining(epochSeconds: Long, now: Long = currentTimeMillis()): String
     return tr("осталось $hours ч", "$hours h left")
 }
 
-/** Скорость: до сотни КБ/с — в килобайтах, дальше в мегабитах. */
 fun formatSpeed(bytesPerSecond: Long): String {
     if (bytesPerSecond < 1024) return "$bytesPerSecond " + tr("Б/с", "B/s")
     if (bytesPerSecond < 100 * 1024) return "${bytesPerSecond / 1024} " + tr("КБ/с", "KB/s")
@@ -581,7 +527,6 @@ fun formatDuration(totalSeconds: Int): String {
     return listOf(h, m, s).joinToString(":") { it.toString().padStart(2, '0') }
 }
 
-/** Дата из epoch-секунд в виде 12.03.2026 (алгоритм civil_from_days). */
 fun formatDate(epochSeconds: Long): String {
     if (epochSeconds <= 0) return "—"
     val z = epochSeconds / 86400 + 719468
@@ -597,7 +542,6 @@ fun formatDate(epochSeconds: Long): String {
     return "${day.toString().padStart(2, '0')}.${month.toString().padStart(2, '0')}.$year"
 }
 
-/** Сколько осталось до даты; отрицательное — просрочено. */
 fun daysUntil(epochSeconds: Long, now: Long = currentTimeMillis()): Long =
     if (epochSeconds <= 0) Long.MAX_VALUE else (epochSeconds - now / 1000) / 86400
 

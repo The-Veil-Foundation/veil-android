@@ -23,19 +23,12 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** Матрица QR: true — тёмный модуль. */
 class QrMatrix(val size: Int, private val bits: BooleanArray) {
     fun isDark(x: Int, y: Int): Boolean = bits[y * size + x]
 }
 
-/** Кодирует текст в QR; null — платформа не умеет или текст слишком длинный. */
 expect fun encodeQr(text: String): QrMatrix?
 
-/**
- * QR на белой карточке. Модули рисуются квадратами, выровненными по целым
- * пикселям, с полноценным «тихим полем» в 4 модуля — иначе на приставке код
- * получается «мыльным» и камера телефона его не берёт.
- */
 @Composable
 fun QrCode(text: String, modifier: Modifier = Modifier, side: Dp = 240.dp) {
     val matrix = remember(text) { encodeQr(text) }
@@ -58,8 +51,7 @@ fun QrCode(text: String, modifier: Modifier = Modifier, side: Dp = 240.dp) {
                     val quiet = 4
                     val modules = matrix.size + quiet * 2
                     val limit = size.minDimension
-                    // Целый размер модуля + целочисленное выравнивание: без
-                    // полупрозрачных краёв и «дрожащих» границ при масштабировании.
+
                     val rawCell = limit / modules
                     val cell = if (rawCell >= 1f) floor(rawCell) else max(rawCell, 0.5f)
                     val total = cell * modules

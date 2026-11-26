@@ -1,6 +1,7 @@
 package dev.local.veil.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -9,17 +10,12 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import dev.local.veil.core.AppStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.local.veil.core.AppStyle
 
-/**
- * Material You: на Android 12+ палитра берётся из обоев пользователя,
- * на десктопе и старых версиях — резервная фиолетовая схема.
- */
 @Composable
 expect fun dynamicColorScheme(darkTheme: Boolean): ColorScheme?
 
@@ -46,11 +42,6 @@ private val FallbackLight = lightColorScheme(
     outlineVariant = Color(0xFFCAC4D0),
 )
 
-/**
- * Тёмная палитра в духе ночных настроек One UI: глубокий сине-серый фон,
- * карточки на тон светлее и спокойный голубой акцент. В отличие от
- * фиолетового M3 по умолчанию, такой интерфейс меньше «светится» ночью.
- */
 private val FallbackDark = darkColorScheme(
     primary = Color(0xFFA9C7FF),
     onPrimary = Color(0xFF0B2B52),
@@ -78,10 +69,6 @@ private val FallbackDark = darkColorScheme(
     outlineVariant = Color(0xFF2A3644),
 )
 
-/**
- * Pitch Black: тот же акцент, но фон и поверхности — настоящий чёрный.
- * На OLED такие пиксели выключены, поэтому экран не светится в темноте.
- */
 private fun pitchBlackScheme(base: ColorScheme): ColorScheme = base.copy(
     background = Color(0xFF000000),
     onBackground = Color(0xFFEDE9F4),
@@ -95,10 +82,6 @@ private fun pitchBlackScheme(base: ColorScheme): ColorScheme = base.copy(
     outlineVariant = Color(0xFF26232D),
 )
 
-/**
- * Режим разметки. iOS-лэйаут включён, но сами компоненты остаются
- * Material 3 Expressive: цвета, формы и контролы берутся из темы.
- */
 val LocalAppStyle = staticCompositionLocalOf { AppStyle.IOS }
 
 @Composable
@@ -111,9 +94,6 @@ fun OrbitTheme(
     val base = dynamicColorScheme(dark) ?: if (dark) FallbackDark else FallbackLight
     val scheme = if (pitchBlack) pitchBlackScheme(base) else base
 
-    // MaterialExpressiveTheme в Compose Multiplatform 1.9 ещё помечен internal
-    // (публичен только в androidx-сборке), поэтому берём MaterialTheme и
-    // добавляем экспрессивность сами: формы, типографика и Motion.kt.
     MaterialTheme(
         colorScheme = animatedColorScheme(scheme),
         typography = orbitTypography(),
@@ -122,10 +102,6 @@ fun OrbitTheme(
     )
 }
 
-/**
- * Плавная смена темы: каждый цвет схемы перетекает к новому значению, а не
- * переключается кадром. На слабых устройствах — мгновенно.
- */
 @Composable
 private fun animatedColorScheme(target: ColorScheme): ColorScheme {
     val spec: androidx.compose.animation.core.AnimationSpec<androidx.compose.ui.graphics.Color> =
@@ -182,26 +158,20 @@ private fun animatedColorScheme(target: ColorScheme): ColorScheme {
     )
 }
 
-/** Материаловские скругления из редизайна: крупные радиусы, мягкие формы. */
 internal fun orbitShapes() = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
+    medium = RoundedCornerShape(20.dp),
     large = RoundedCornerShape(28.dp),
     extraLarge = RoundedCornerShape(36.dp),
 )
 
-/**
- * Эмфатическая типографика M3 Expressive: заголовки и подписи плотнее и жирнее,
- * чтобы акценты читались сильнее, чем в базовой шкале.
- */
 internal fun orbitTypography(): Typography {
     val base = Typography()
-    // M3 Expressive: акцентная (emphasized) шкала — те же размеры, но
-    // плотнее трекинг и тяжелее вес для заголовков и подписей.
+
     return base.copy(
         displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
-        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp),
+        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp),
         headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp),
         headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
         titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.sp),

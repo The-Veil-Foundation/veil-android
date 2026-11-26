@@ -9,13 +9,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/**
- * Разбор тела подписки. Порт `SubscriptionPayload.swift`.
- *
- * Панели отдают разное, и форматы нельзя путать: список ссылок теряет
- * маршруты и DNS, а полный конфиг их несёт. Поэтому тело сначала
- * классифицируется, а не прогоняется через парсер ссылок.
- */
 object SubscriptionPayload {
 
     enum class Format(val label: String) {
@@ -36,6 +29,7 @@ object SubscriptionPayload {
             override val format: Format,
             override val nodes: List<ProxyConfig>,
             override val skipped: List<String> = emptyList(),
+            val groups: List<ServerGroup> = emptyList(),
         ) : Body
 
         data class Failure(
@@ -50,25 +44,21 @@ object SubscriptionPayload {
         val text = input.trim()
         if (text.isEmpty()) return Body.Failure(Format.UNKNOWN, "Пустой ответ подписки")
 
-        // 1. JSON-массив полных конфигов (Remnawave/Happ) или один конфиг.
         val first = text.first()
         if (first == '[' || first == '{') {
             jsonBody(text)?.let { return it }
         }
 
-        // 2. Mihomo / Clash YAML: импортируем узлы из `proxies`.
         if (text.contains("proxies:") && text.contains("type:")) {
             MihomoParser.parse(text)?.let { return it }
         }
 
-        // 3. wg-quick
         if (text.contains("[Interface]", true) && text.contains("[Peer]", true)) {
             val cfg = LinkParser.parseWireGuardConf(text)
                 ?: return Body.Failure(Format.WIREGUARD_CONF, "Не удалось разобрать WireGuard-профиль")
             return Body.Ok(Format.WIREGUARD_CONF, listOf(cfg))
         }
 
-        // 4. Ссылки или base64 от ссылок.
         parseLinks(text)?.let { return it }
 
         val decoded = runCatching { base64Decode(text) }.getOrNull()
@@ -78,8 +68,6 @@ object SubscriptionPayload {
 
         return Body.Failure(Format.UNKNOWN, "Формат подписки не распознан")
     }
-
-    /* ---------------- JSON ---------------- */
 
     private fun jsonBody(text: String): Body? {
         val element = runCatching { Json.parseToJsonElement(text) }.getOrNull() ?: return null
@@ -110,7 +98,6 @@ object SubscriptionPayload {
         return Body.Ok(Format.XRAY_CONFIGS, nodes, skipped)
     }
 
-    /** Один элемент массива → профиль + сохранённый документ. */
     private fun configToProfile(config: JsonObject): ProxyConfig? {
         val outbounds = (config["outbounds"] as? JsonArray)
             ?.mapNotNull { it as? JsonObject }
@@ -169,7 +156,6 @@ object SubscriptionPayload {
         )
     }
 
-    /** Конфиг с балансировщиком гоняет трафик по нескольким выходам: считаем прокси среди них. */
     private fun balancedCount(config: JsonObject, outbounds: List<JsonObject>): Int {
         val balancers = (config["routing"] as? JsonObject)?.get("balancers") as? JsonArray
         if (balancers.isNullOrEmpty()) return 0
@@ -197,14 +183,12 @@ object SubscriptionPayload {
             return address to port
         }
 
-        // hysteria/tuic кладут адрес прямо в settings
         settings["address"]?.jsonPrimitive?.contentOrNull?.let { address ->
             settings["port"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.let { port ->
                 return address to port
             }
         }
 
-        // wireguard: endpoint в peer'е
         (settings["peers"] as? JsonArray)?.firstOrNull()?.let { p ->
             val o = p as? JsonObject ?: return@let
             val ep = o["endpoint"]?.jsonPrimitive?.contentOrNull ?: return@let
@@ -226,8 +210,6 @@ object SubscriptionPayload {
         return null
     }
 
-    /* ---------------- ссылки ---------------- */
-
     private fun parseLinks(text: String): Body.Ok? {
         var skipped = 0
         val nodes = ArrayList<ProxyConfig>()
@@ -246,5 +228,4 @@ object SubscriptionPayload {
     }
 }
 
-/** Ключ дедупликации: одна и та же нода из подписки не должна дублироваться. */
 fun ProxyConfig.dedupKey(): String = "$address:$port:$name"

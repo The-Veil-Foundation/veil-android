@@ -2,10 +2,12 @@ package dev.local.veil.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,12 +16,11 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -33,21 +34,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/*
- * Единый «сегментированный» стиль настроек — тот же, что в bottom sheet сервера:
- * каждая строка это отдельный скруглённый сегмент surfaceContainerHigh,
- * между строками зазор 2.dp, у крайних радиус 24.dp, у внутренних — 6.dp.
- * Никаких тонких линий-разделителей: роль разделителя играет сам зазор.
- */
-
-/* ------------------------------------------------------------------ */
-/* Контейнеры                                                          */
-/* ------------------------------------------------------------------ */
-
-/** Группа настроек: подпись с иконкой и «остров» из сегментов. */
 @Composable
 internal fun SettingsGroup(
     title: String,
@@ -62,56 +53,34 @@ internal fun SettingsGroup(
         ) {
             Box(
                 Modifier
-                    .size(26.dp)
-                    .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                    .size(36.dp)
+                    .background(MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 AppIcon(
                     icon,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(15.dp),
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.size(20.dp),
                 )
             }
             Text(
                 title,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
 
-        Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                rows.forEachIndexed { index, row ->
-                    row()
-                    if (index != rows.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            thickness = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
-                        )
-                    }
-                }
-            }
-        }
+        SegmentedGroup(rows = rows)
     }
 }
 
-/**
- * Сегментированный список как в bottom sheet: строки — отдельные скруглённые
- * сегменты с зазором 2.dp; крайние получают большой радиус, внутренние — малый.
- * Этот «разделитель» и есть зазор между сегментами.
- */
 @Composable
 internal fun SegmentedGroup(
     modifier: Modifier = Modifier,
     rows: List<@Composable () -> Unit>,
 ) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
         rows.forEachIndexed { index, row ->
             val top = if (index == 0) Md3Shapes.lg else Md3Shapes.xs
             val bottom = if (index == rows.lastIndex) Md3Shapes.lg else Md3Shapes.xs
@@ -122,7 +91,7 @@ internal fun SegmentedGroup(
                     bottomStart = bottom,
                     bottomEnd = bottom,
                 ),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 row()
@@ -131,11 +100,6 @@ internal fun SegmentedGroup(
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Строки                                                              */
-/* ------------------------------------------------------------------ */
-
-/** Переключатель: подпись, описание и Switch справа. */
 @Composable
 internal fun SegmentSwitch(
     title: String,
@@ -151,11 +115,16 @@ internal fun SegmentSwitch(
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             subtitle?.let { SegmentCaption(it) }
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = if (LocalTvMode.current) null else onCheckedChange,
+            thumbContent = {
+                AppIcon(if (checked) AppIcons.Check else AppIcons.Close, modifier = Modifier.size(16.dp))
+            },
+        )
     }
 }
 
-/** Переход в другой экран или действие: подпись, описание и шеврон. */
 @Composable
 internal fun SegmentAction(
     title: String,
@@ -178,7 +147,6 @@ internal fun SegmentAction(
     }
 }
 
-/** Вариант выбора: подпись и ряд чипов под ней. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SegmentChoice(
@@ -216,7 +184,6 @@ internal fun SegmentChoice(
     }
 }
 
-/** Только информация: подпись слева, значение справа. */
 @Composable
 internal fun SegmentInfo(label: String, value: String) {
     Row(
@@ -238,7 +205,6 @@ internal fun SegmentInfo(label: String, value: String) {
     }
 }
 
-/** Поле ввода внутри сегмента. */
 @Composable
 internal fun SegmentInput(
     value: String,
@@ -258,16 +224,11 @@ internal fun SegmentInput(
     )
 }
 
-/** Вариант для [SegmentChoice]. */
 internal class SegmentOption(
     val label: String,
     val selected: Boolean,
     val onClick: () -> Unit,
 )
-
-/* ------------------------------------------------------------------ */
-/* Внутреннее                                                          */
-/* ------------------------------------------------------------------ */
 
 @Composable
 private fun SegmentRow(
@@ -284,6 +245,7 @@ private fun SegmentRow(
     Row(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = 64.dp)
             .then(clickable)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -297,7 +259,7 @@ private fun SegmentRow(
 private fun SegmentIcon(icon: ImageVector) {
     Box(
         Modifier
-            .size(36.dp)
+            .size(40.dp)
             .background(
                 MaterialTheme.colorScheme.secondaryContainer,
                 RoundedCornerShape(Md3Shapes.sm),
@@ -307,7 +269,7 @@ private fun SegmentIcon(icon: ImageVector) {
         AppIcon(
             icon,
             tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.size(19.dp),
+            modifier = Modifier.size(22.dp),
         )
     }
 }
@@ -321,27 +283,27 @@ private fun SegmentCaption(text: String) {
     )
 }
 
-/* ------------------------------------------------------------------ */
-/* Чип                                                                 */
-/* ------------------------------------------------------------------ */
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChipSmall(text: String, selected: Boolean, onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val reduceMotion = LocalReduceMotion.current || LocalTvMode.current
     val color by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+        animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 1f, stiffness = 1600f),
         label = "chip-bg",
     )
     val content by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 1f, stiffness = 1600f),
         label = "chip-fg",
     )
     val corner by animateDpAsState(
-        if (selected) 18.dp else 12.dp,
-        tween(180),
+        if (pressed) 10.dp else if (selected) 16.dp else 24.dp,
+        if (reduceMotion) snap() else spring(dampingRatio = .75f, stiffness = 700f),
         label = "chip-r",
     )
-    val source = remember { MutableInteractionSource() }
     val scale = pressScale(source, 0.92f)
     Surface(
         onClick = onClick,
@@ -349,21 +311,21 @@ fun ChipSmall(text: String, selected: Boolean, onClick: () -> Unit) {
         shape = RoundedCornerShape(corner),
         color = color,
         contentColor = content,
-        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale },
+        modifier = Modifier.heightIn(min = 48.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .semantics { this.selected = selected },
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-        )
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selected) AppIcon(AppIcons.Check, modifier = Modifier.size(18.dp))
+            Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
-/**
- * Поле ввода без контрастной рамки, как в листе «Добавить»: тональная
- * подложка, рамка появляется только в фокусе.
- */
 @Composable
 internal fun veilFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,

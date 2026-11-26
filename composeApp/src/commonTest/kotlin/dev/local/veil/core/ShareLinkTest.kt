@@ -6,7 +6,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** Ссылка → узел → ссылка → узел: ничего не теряется. Значения вымышленные. */
 class ShareLinkTest {
 
     private fun roundTrip(cfg: ProxyConfig): ProxyConfig {

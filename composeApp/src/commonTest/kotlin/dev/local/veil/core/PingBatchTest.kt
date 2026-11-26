@@ -41,7 +41,7 @@ class PingBatchTest {
         val outbounds = (doc["outbounds"] as JsonArray).map { (it as JsonObject)["tag"].toString().trim('"') }
         assertTrue(outbounds.containsAll(listOf("ping-out-0", "ping-out-1", "ping-out-2", "direct")))
         assertTrue("proxy" !in outbounds)
-        // Каждый detour должен вести в существующий выход: иначе ядро не стартует.
+
         val detours = Regex("\"detour\":\"([^\"]+)\"").findAll(doc.toString()).map { it.groupValues[1] }.toList()
         assertTrue(detours.all { it in outbounds }, "висячие detour: $detours")
         println("SBCFG " + doc)

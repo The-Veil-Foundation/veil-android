@@ -21,12 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/*
- * Совместимый слой для iOS-лэйаута: имена остались прежними, но визуал —
- * Material 3 Expressive. Никакого стекла и прозрачных бликов: тональные
- * поверхности, мягкая тень и стандартные формы.
- */
-
 @Composable
 internal fun Modifier.liquidGlass(
     cornerRadius: Dp,
@@ -35,7 +29,7 @@ internal fun Modifier.liquidGlass(
     borderAlpha: Float = 1f,
 ): Modifier {
     val shape = RoundedCornerShape(cornerRadius)
-    // Слишком прозрачный тон игнорируем: карточка должна оставаться читаемой.
+
     val fill = if (tint.alpha > 0.18f) tint else MaterialTheme.colorScheme.surfaceContainerLow
     var base = this
     if (elevation > 0.dp) {
@@ -73,8 +67,7 @@ internal fun GlassIconButton(
     tint: Color = MaterialTheme.colorScheme.onSurface,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    // Без minimumInteractiveComponentSize: в плотной строке iOS-лэйаута
-    // стандартные 48 dp перекрывают соседние элементы.
+
     Box(
         modifier = modifier
             .clip(CircleShape)

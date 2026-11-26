@@ -22,17 +22,6 @@ import java.io.FileOutputStream
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Мост к официальному `libbox.aar` (sing-box 1.12.9).
- *
- * Класс намеренно лежит в пакете `singbox` с именем `Singbox`: существующий
- * [dev.local.veil.platform.SingboxBridge] ищет ровно `singbox.Singbox` через
- * рефлексию, поэтому приложение получает sing-box без переписывания сервиса.
- *
- * Ядро работает с уже созданным `VpnService.establish()` TUN: сервис передаёт
- * сюда fd, а [Platform.openTun] отдаёт Go-стороне его дубликат (оригинал
- * остаётся у сервиса — так же, как в Xray-пути).
- */
 object Singbox {
 
     @Volatile private var context: Context? = null
@@ -43,7 +32,6 @@ object Singbox {
     @Volatile private var logPath: String? = null
     @Volatile private var tunFd: Int = 0
 
-    /** Вызывается из активности/сервиса: без basePath libbox не стартует. */
     @JvmStatic
     @Synchronized
     fun install(ctx: Context) {
@@ -83,8 +71,7 @@ object Singbox {
         if (!installed) install(ctx)
         stop()
         this.tunFd = tunFd
-        // Для диагностики: конфиг, который реально получило ядро.
-        // Внешний каталог — чтобы его можно было снять через adb.
+
         runCatching {
             val dir = ctx.getExternalFilesDir(null) ?: ctx.filesDir
             File(dir, "singbox.config.json").writeText(configJson)
@@ -111,7 +98,7 @@ object Singbox {
         val ctx = context ?: error("sing-box: контекст не инициализирован")
         if (!installed) install(ctx)
         stopProbe()
-        // У пробного конфига SOCKS-inbound: TUN не создаётся, fd не нужен.
+
         val created = Libbox.newService(configJson, Platform(0))
         created.start()
         probe = created
@@ -131,7 +118,6 @@ object Singbox {
         Libbox.checkConfig(configJson)
     }
 
-    /** Своя статистика: приложение вне туннеля, поэтому его байты — это трафик прокси. */
     @JvmStatic
     fun uplinkTotal(): Long = runCatching {
         TrafficStats.getUidTxBytes(Process.myUid()).toLong()
@@ -142,10 +128,6 @@ object Singbox {
         TrafficStats.getUidRxBytes(Process.myUid()).toLong()
     }.getOrDefault(0L)
 
-    /**
-     * Дубликат fd без владения оригиналом: PFD.detachFd отдаёт дескриптор
-     * Go-стороне, а мастер-дескриптор сервиса остаётся нетронутым.
-     */
     private fun dupFd(fd: Int): Int {
         val source = java.io.FileDescriptor()
         val field = java.io.FileDescriptor::class.java.getDeclaredField("descriptor")
@@ -154,15 +136,14 @@ object Singbox {
         return android.os.ParcelFileDescriptor.dup(source).detachFd()
     }
 
-    /** Реализация PlatformInterface: минимум, необходимый sing-box на Android. */
-    private class Platform(private val fd: Int) : PlatformInterface {
+    internal class Platform(private val fd: Int) : PlatformInterface {
         private val tunnelTaken = AtomicBoolean(false)
 
         override fun openTun(options: TunOptions): Int {
             if (fd <= 0) error("sing-box: TUN не создан (fd=$fd)")
-            // Ровно один раз: повторный openTun означает второй tun inbound.
+
             if (!tunnelTaken.compareAndSet(false, true)) error("sing-box: TUN уже открыт")
-            // dup, чтобы закрытие fd ядром не затронуло мастер-дескриптор сервиса.
+
             return dupFd(fd)
         }
 
@@ -170,11 +151,6 @@ object Singbox {
 
         override fun usePlatformAutoDetectInterfaceControl(): Boolean = false
 
-        /**
-         * Владелец соединения — для правил `package_name` (на macOS это
-         * `process_name`). Работает с Android 10: активному VPN-приложению
-         * система отдаёт uid по кортежу соединения.
-         */
         override fun findConnectionOwner(
             ipProtocol: Int,
             sourceAddress: String,
@@ -208,10 +184,6 @@ object Singbox {
             }.getOrDefault(-1)
         }
 
-        // Сознательно не отдаём sing-box сетевые интерфейсы: привязка сокета
-        // к rmnet_data0/wlan0 на Android уводит его в собственный TUN и даёт
-        // "i/o timeout". Приложение уже исключено из VPN, поэтому обычный
-        // маршрут ОС — единственно правильный.
         override fun getInterfaces(): NetworkInterfaceIterator? = null
 
         override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) = Unit
@@ -245,4 +217,3 @@ object Singbox {
         override fun includeAllNetworks(): Boolean = false
     }
 }
-

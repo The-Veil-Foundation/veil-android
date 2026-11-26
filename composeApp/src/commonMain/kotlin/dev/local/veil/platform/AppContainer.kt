@@ -16,7 +16,7 @@ data class VpnStatus(
     val coreVersion: String? = null,
     val uplink: Long = 0,
     val downlink: Long = 0,
-    /** Текущая скорость в байтах в секунду — считается по дельте счётчиков. */
+
     val uplinkSpeed: Long = 0,
     val downlinkSpeed: Long = 0,
     val connectedSince: Long = 0,
@@ -29,30 +29,15 @@ data class VpnStatus(
 interface VpnController {
     val status: StateFlow<VpnStatus>
 
-    /** Приложение на экране: в фоне таймеры и счётчики не крутим. */
     val foreground: StateFlow<Boolean>
 
-    /** Версия ядра, если оно собрано в APK. */
     val coreVersion: String?
     val coreAvailable: Boolean
-    /**
-     * Проверяет узел по-настоящему: поднимает ядро с локальным SOCKS и делает
-     * запрос через него. TCP-пинг ловит только живые порты, а здесь проверяется
-     * и рукопожатие, и авторизация на сервере.
-     */
+
     suspend fun probe(server: ProxyConfig, options: TunnelOptions): Boolean
 
-    /**
-     * Реальная задержка: запрос через ядро и сервер, по уже открытому
-     * соединению — то есть чистый RTT пути «телефон → сервер → интернет».
-     * null — узел не отвечает или ядра нет.
-     */
     suspend fun realPing(server: ProxyConfig, options: TunnelOptions, timeoutMs: Int = 4000): Int? = null
 
-    /**
-     * Реальная задержка для многих узлов сразу. Результат по каждому узлу
-     * приходит в [report] по мере готовности. По умолчанию — по одному.
-     */
     suspend fun realPingBatch(
         servers: List<ProxyConfig>,
         options: TunnelOptions,
@@ -83,11 +68,6 @@ interface SettingsStore {
     fun save(settings: AppSettings)
 }
 
-/**
- * Скачивание подписки по URL. Только нативно: панели не отдают CORS,
- * а часть из них (Remnawave) требует HWID в заголовках.
- */
-/** Лимиты тарифа из заголовка `subscription-userinfo`. */
 data class SubscriptionUsage(
     val upload: Long = 0,
     val download: Long = 0,
@@ -98,7 +78,6 @@ data class SubscriptionUsage(
     val remaining: Long get() = if (total > 0) (total - used).coerceAtLeast(0) else 0
 }
 
-/** Тело подписки плюс всё, что панель рассказала о тарифе. */
 data class SubscriptionFetch(
     val body: String,
     val usage: SubscriptionUsage? = null,
@@ -109,48 +88,39 @@ data class SubscriptionFetch(
 )
 
 interface SubscriptionFetcher {
-    /**
-     * [userAgent] — свой UA источника; null или пусто — общий [userAgent].
-     * [hwid] — что слать в `X-Hwid`: null — не слать вовсе.
-     */
+
     suspend fun fetch(url: String, userAgent: String? = null, hwid: String? = deviceId): Result<SubscriptionFetch>
-    /** Идентификатор устройства для панелей (HWID), 16 hex-символов как на macOS. */
+
     val deviceId: String
-    /** Выпускает новый HWID: для панели это новое устройство. */
+
     fun regenerateDeviceId(): String
-    /** Ставит HWID, выданный провайдером, как есть (только без пробелов по краям). */
+
     fun setDeviceId(raw: String): String?
-    /**
-     * Панели отдают разный формат в зависимости от клиента: список ссылок
-     * или полный конфиг с маршрутами. Выбор UA — это выбор формата.
-     */
+
     var userAgent: String
 }
 
-/** geoip.dat / geosite.dat для правил geosite:/geoip:. */
+data class GeoDownloadProgress(val file: String, val bytes: Long, val total: Long?)
+
 interface GeoService {
     val directory: String
     val hasAssets: Boolean
-    /** [customGeoip]/[customGeosite] — адреса для [GeoAssetSource.CUSTOM]. */
+
     suspend fun download(source: GeoAssetSource, customGeoip: String = "", customGeosite: String = ""): Result<Unit>
+    suspend fun downloadWithProgress(source: GeoAssetSource, customGeoip: String, customGeosite: String,
+        onProgress: (GeoDownloadProgress) -> Unit): Result<Unit> = download(source, customGeoip, customGeosite)
 }
 
-/** Доступ к логам ядра из интерфейса. */
 interface LogProvider {
-    /** Путь к файлу — показываем в настройках, чтобы можно было достать вручную. */
+
     val path: String
     suspend fun read(): String
     fun clear()
 
-    /**
-     * Лог пробного ядра: пинги и проверки узлов. На Android для них часто
-     * работает sing-box, даже когда туннель держит Xray.
-     */
     suspend fun readChecks(): String = ""
     fun clearChecks() {}
 }
 
-/** Релиз с GitHub, который можно поставить поверх текущей версии. */
 data class AppRelease(
     val version: String,
     val notes: String,
@@ -158,10 +128,9 @@ data class AppRelease(
     val pageUrl: String,
 )
 
-/** Обновления по воздуху из GitHub Releases. */
 interface UpdateService {
     val currentVersion: String
-    /** null — обновлений нет (или релизов ещё не публиковали). */
+
     suspend fun latest(): Result<AppRelease?>
     suspend fun download(release: AppRelease, onProgress: (Float) -> Unit): Result<String>
     fun install(path: String): Result<Unit>
@@ -180,12 +149,11 @@ interface AppContainer {
     val packages: PackageLister
     val pinger: Pinger
 
-    /** Перенос на другие устройства и «Поделиться»; по умолчанию недоступен. */
+    val sharing: InternetSharing? get() = null
+
+    val openNotificationSettings: (() -> Unit)? get() = null
+
     val transfer: TransferService get() = NoTransferService
 
-    /**
-     * Проверяет конфиг ядром, которое его запустит, не запуская туннель.
-     * null — ядра нет (сборка без .aar): проверять нечем.
-     */
     fun checkConfig(engine: dev.local.veil.core.CoreEngine, configJson: String): Result<Unit>? = null
 }

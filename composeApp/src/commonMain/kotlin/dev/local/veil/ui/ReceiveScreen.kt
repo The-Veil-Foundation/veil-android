@@ -33,10 +33,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/**
- * Приём подписок с телефона: QR с адресом приставки в локальной сети.
- * На телевизоре камеры нет, поэтому код показывает приставка, а сканирует телефон.
- */
 @Composable
 fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
     var url by remember { mutableStateOf<String?>(null) }
@@ -90,8 +86,7 @@ fun ReceiveScreen(state: VeilState, modifier: Modifier = Modifier) {
                         ExpressiveLoader(diameter = 56.dp)
                     }
                     else -> {
-                        // На приставке код должен читаться с дивана: размер
-                        // считаем от экрана, а не фиксируем.
+
                         val qrSide = if (wide) {
                             minOf(availableWidth * 0.44f, availableHeight * 0.70f, 600.dp)
                         } else {

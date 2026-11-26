@@ -1,32 +1,24 @@
 package dev.local.veil.core
 
-/**
- * Что пользователь вставил или отсканировал. Порт AddInput.swift из veil-macos:
- * выбирать «подписка или ссылка» не нужно — лист сам понимает, что это.
- */
 object AddInput {
 
     sealed interface Kind {
         data object Empty : Kind
 
-        /** Адрес подписки, который ещё нужно скачать. */
         data class Subscription(val url: String) : Kind {
             val host: String get() = url.substringAfter("://").substringBefore('/').substringBefore('?')
         }
 
-        /** Ссылки узлов, wg-quick или тело подписки целиком — качать нечего. */
         data class Servers(val body: SubscriptionPayload.Body.Ok) : Kind
 
         data class Invalid(val message: String) : Kind
     }
 
     fun classify(raw: String): Kind {
-        // QR и буфер обмена иногда приносят BOM и zero-width символы, trim() их не видит.
+
         val text = raw.filterNot { it in INVISIBLE }.trim()
         if (text.isEmpty()) return Kind.Empty
 
-        // Ссылки узлов и тела подписок живут в других схемах, чем http(s),
-        // поэтому сначала они: адрес подписки — только если узлов не нашлось.
         if (!isSingleHttpUrl(text)) {
             val body = SubscriptionPayload.classify(text)
             if (body is SubscriptionPayload.Body.Ok && body.nodes.isNotEmpty()) return Kind.Servers(body)
@@ -34,12 +26,8 @@ object AddInput {
 
         subscriptionUrl(text)?.let { return Kind.Subscription(it) }
 
-        // QR из панелей (Remnawave, Marzban, 3x-ui) часто — диплинк клиента
-        // с адресом подписки внутри: happ://add/https://…, v2raytun://import/…,
-        // clash://install-config?url=…, sing-box://import-remote-profile?url=…
         wrappedSubscriptionUrl(text)?.let { return Kind.Subscription(it) }
 
-        // Некоторые панели выдают адрес подписки в base64.
         decodeBase64(text)?.trim()?.let { decoded -> subscriptionUrl(decoded)?.let { return Kind.Subscription(it) } }
 
         return Kind.Invalid("Not a link or subscription URL")
@@ -47,7 +35,6 @@ object AddInput {
 
     private val INVISIBLE = setOf('\uFEFF', '\u200B', '\u200C', '\u200D', '\u2060')
 
-    /** Адрес подписки из диплинка другого клиента, если он там есть. */
     internal fun wrappedSubscriptionUrl(text: String): String? {
         val schemeEnd = text.indexOf("://")
         if (schemeEnd <= 0) return null
@@ -55,7 +42,6 @@ object AddInput {
         if (scheme == "http" || scheme == "https") return null
         val rest = text.substring(schemeEnd + 3)
 
-        // ?url=… / &url=… (обычно percent-encoded)
         val query = rest.substringBefore('#').substringAfter('?', "")
         if (query.isNotEmpty()) {
             for (pair in query.split('&')) {
@@ -66,7 +52,6 @@ object AddInput {
             }
         }
 
-        // add/https://…, import/https%3A%2F%2F…, или сразу https://… после схемы
         val path = rest.substringBefore('#')
         val candidates = listOf(path, percentDecode(path))
         for (candidate in candidates) {

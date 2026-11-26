@@ -1,9 +1,9 @@
 name: Release
 
-# Только ручной запуск: Actions → Release → Run workflow.
-# Вводится тег (например v0.1.1), он же становится именем релиза.
-# Никаких сборок на push — минуты не тратятся.
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -16,6 +16,9 @@ on:
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 concurrency:
   group: release
@@ -48,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
-          TAG_VERSION="${{ inputs.tag }}"
+           TAG_VERSION="$RELEASE_TAG"
           TAG_VERSION="${TAG_VERSION#v}"
           echo "VERSION: $FILE_VERSION"
           echo "tag:     $TAG_VERSION"
@@ -75,30 +78,39 @@ jobs:
             } >> "$GITHUB_ENV"
             echo "Release key restored"
           else
-            echo "No signing key secret: release will be debug-signed"
+            echo "::error::Release signing key is required"
+            exit 1
           fi
 
       - name: Build release APKs
         run: |
           chmod +x gradlew
           ./gradlew :composeApp:assembleRelease -PabiSplits --no-daemon
+          mkdir -p out
+          cp composeApp/build/outputs/apk/release/composeApp-*-release.apk out/
+          ./gradlew :composeApp:assembleRelease --no-daemon
 
       - name: Collect APKs
         run: |
           set -euo pipefail
-          VERSION="${{ inputs.tag }}"
+          VERSION="$RELEASE_TAG"
           VERSION="${VERSION#v}"
           mkdir -p out
           SRC=composeApp/build/outputs/apk/release
-          cp "$SRC/composeApp-arm64-v8a-release.apk"  "out/veil-$VERSION-arm64-v8a.apk"
-          cp "$SRC/composeApp-x86_64-release.apk"     "out/veil-$VERSION-x86_64.apk"
+          mv out/composeApp-armeabi-v7a-release.apk "out/veil-$VERSION-armeabi-v7a.apk"
+          mv out/composeApp-arm64-v8a-release.apk "out/veil-$VERSION-arm64-v8a.apk"
+          mv out/composeApp-x86_64-release.apk "out/veil-$VERSION-x86_64.apk"
+          cp "$SRC/composeApp-release.apk" "out/veil-$VERSION-universal.apk"
+          (cd out && sha256sum *.apk > SHA256SUMS)
           ls -lh out
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
-          name: ${{ inputs.tag }}
-          files: out/*.apk
-          generate_release_notes: true
-          draft: ${{ inputs.draft }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          body_path: docs/releases/${{ env.RELEASE_TAG }}.md
+          files: |
+            out/*.apk
+            out/SHA256SUMS
+          draft: ${{ inputs.draft || false }}

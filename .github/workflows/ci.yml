@@ -1,7 +1,5 @@
 name: CI
 
-# Только ручной запуск: Actions → CI → Run workflow.
-# Автоматических сборок на push/PR нет, минуты не тратятся.
 on:
   workflow_dispatch:
 

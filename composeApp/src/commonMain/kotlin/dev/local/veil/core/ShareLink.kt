@@ -3,11 +3,6 @@ package dev.local.veil.core
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/**
- * Собирает share-ссылку узла — обратная операция к [LinkParser].
- * Для узлов из готового конфига Xray (rawConfigJson) и для протоколов,
- * которых ссылка не покрывает, возвращает null.
- */
 object ShareLink {
 
     fun encode(cfg: ProxyConfig): String? {
@@ -71,7 +66,6 @@ object ShareLink {
         return "ss://$userInfo@${hostPart(cfg.address)}:${cfg.port}#${pct(cfg.name)}"
     }
 
-    /** Транспорт и защита канала: общие для vless и trojan параметры. */
     private fun streamParams(cfg: ProxyConfig): Array<Pair<String, String?>> = arrayOf(
         "type" to cfg.network.wire,
         "security" to cfg.security.wire,

@@ -67,12 +67,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.local.veil.core.SplitMode
 
-/**
- * Раздельный туннель в духе Material 3 Expressive: крупные формы, пружинные
- * переходы, «сегментированный» список с группированными скруглениями.
- *
- * Режим EXCLUDE — в VPN всё, кроме отмеченных; INCLUDE — только отмеченные.
- */
 @Composable
 fun SplitTunnelScreen(
     state: VeilState,
@@ -85,7 +79,6 @@ fun SplitTunnelScreen(
 
     LaunchedEffect(Unit) { state.loadApps() }
 
-    // Изменения применяются при выходе с экрана: туннель пересоздаётся один раз.
     DisposableEffect(Unit) {
         state.beginSplitEdit()
         onDispose { state.finishSplitEdit() }
@@ -218,7 +211,7 @@ fun SplitTunnelScreen(
                     else MaterialTheme.colorScheme.surfaceContainerLow,
                     label = "app-bg",
                 )
-                // Выбранная строка «вспухает» в пузырь, остальные остаются сегментами.
+
                 val popped = checked && enabled
                 val cornerSpec = spring<androidx.compose.ui.unit.Dp>(dampingRatio = 0.6f, stiffness = 420f)
                 val top by animateDpAsState(
@@ -277,7 +270,6 @@ private val modeItems = listOf(
     ModeItem(SplitMode.INCLUDE, tr("Только", "Only"), tr("Только в VPN", "Only in VPN"), AppIcons.Check),
 )
 
-/** Выбранная кнопка расширяется и округляется пружинно (Expressive). */
 @Composable
 private fun ModeSelector(selected: SplitMode, onSelect: (SplitMode) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -409,7 +401,6 @@ private fun AppIcon(state: VeilState, packageName: String, label: String, select
     }
 }
 
-/** Индикатор выбора: морфится в печенье при активации (Expressive). */
 @Composable
 private fun CheckBadge(checked: Boolean, enabled: Boolean) {
     val active = checked && enabled

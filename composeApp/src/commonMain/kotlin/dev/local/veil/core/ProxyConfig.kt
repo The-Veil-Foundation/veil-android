@@ -4,7 +4,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.random.Random
 
-/** Поддерживаемые протоколы. Как и в iOS-сборке, реально работает только Xray. */
 @Serializable
 enum class ProxyProtocol(val wire: String) {
     @SerialName("vless") VLESS("vless"),
@@ -17,7 +16,6 @@ enum class ProxyProtocol(val wire: String) {
     @SerialName("anytls") ANYTLS("anytls"),
     ;
 
-    /** Xray умеет всё, кроме QUIC-протоколов и AnyTLS из этого списка. */
     val xraySupported: Boolean
         get() = this != HYSTERIA2 && this != TUIC && this != ANYTLS
 
@@ -56,9 +54,6 @@ enum class StreamSecurity(val wire: String) {
     }
 }
 
-/**
- * Один сервер. Каноническое представление, из которого собирается конфиг Xray.
- */
 @Serializable
 data class ProxyConfig(
     val id: String = newId(),
@@ -69,7 +64,6 @@ data class ProxyConfig(
     val address: String,
     val port: Int,
 
-    // auth
     val uuid: String? = null,
     val password: String? = null,
     val method: String? = null,
@@ -77,11 +71,9 @@ data class ProxyConfig(
     val flow: String? = null,
     val encryption: String? = null,
 
-    // transport
     val network: TransportNetwork = TransportNetwork.TCP,
     val security: StreamSecurity = StreamSecurity.NONE,
 
-    // tls / reality
     val sni: String? = null,
     val alpn: List<String>? = null,
     val fingerprint: String? = null,
@@ -90,17 +82,14 @@ data class ProxyConfig(
     val shortId: String? = null,
     val spiderX: String? = null,
 
-    // ws / http / grpc
     val path: String? = null,
     val host: String? = null,
     val serviceName: String? = null,
 
-    // xhttp
     val xhttpMode: String? = null,
     val xPaddingBytes: String? = null,
     val xhttpExtra: String? = null,
 
-    // sing-box only
     val obfs: String? = null,
     val obfsPassword: String? = null,
     val congestionControl: String? = null,
@@ -108,7 +97,6 @@ data class ProxyConfig(
     val upMbps: Int? = null,
     val downMbps: Int? = null,
 
-    // wireguard
     val privateKey: String? = null,
     val peerPublicKey: String? = null,
     val presharedKey: String? = null,
@@ -117,22 +105,12 @@ data class ProxyConfig(
     val mtu: Int? = null,
     val reserved: List<Int>? = null,
 
-    // ui
     val hidden: Boolean = false,
 
-    /**
-     * Полный Xray-конфиг из подписки, если панель отдаёт не ссылку, а готовый
-     * документ (Remnawave/Happ). При подключении из него берётся всё, кроме
-     * inbounds — они заменяются на наш tun.
-     */
     val rawConfigJson: String? = null,
-    /**
-     * Сколько прокси-выходов панель свела в этот узел балансировщиком
-     * (например, REALITY + TLS + XHTTP одной страны). 0 — обычный узел.
-     */
+
     val balanced: Int = 0,
 
-    /** Из какой подписки пришла нода — чтобы обновление заменяло её целиком. */
     val source: String? = null,
 ) {
     val endpoint: String get() = "$address:$port"
@@ -143,22 +121,16 @@ data class ProxyConfig(
             return cleaned.ifEmpty { listOf("0.0.0.0/0", "::/0") }
         }
 
-    /** Полный туннель или только отдельные префиксы (WireGuard-сайдкар). */
     val carriesEverything: Boolean
         get() = allowedIPs.isNullOrEmpty() ||
             (allowedIPs.any { it.trim() == "0.0.0.0/0" } && allowedIPs.any { it.trim() == "::/0" })
 
     val isUsable: Boolean get() = proto.xraySupported
 
-    /**
-     * Узел-заглушка: панели кладут в подписку строки-объявления с адресом
-     * 0.0.0.0 или портом 0. Подключаться к ним и проверять их бессмысленно.
-     */
     val isPlaceholder: Boolean
         get() = address.trim().lowercase() in PLACEHOLDER_HOSTS || port <= 0
 }
 
-/** Короткий стабильный идентификатор вместо UUID. */
 fun newId(): String {
     val chars = "0123456789abcdef"
     return buildString(16) {

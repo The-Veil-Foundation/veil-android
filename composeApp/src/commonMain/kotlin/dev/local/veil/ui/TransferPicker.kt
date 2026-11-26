@@ -32,18 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/**
- * «Что отправить на приставку?» — после скана QR или «Открыть в Veil» на
- * странице приставки. По умолчанию отмечено всё; ключи уходят только после
- * «Отправить».
- */
 @Composable
 internal fun TransferPicker(state: VeilState) {
     val subscriptions = state.subscriptions
     val manualCount = state.servers.count { it.source == null }
-    // Храним снятые галочки, а не отмеченные: при холодном старте по ссылке
-    // список подписок ещё грузится, и «всё отмечено» должно включать то,
-    // что появится через мгновение.
+
     var excluded by remember { mutableStateOf(emptySet<String>()) }
     var manualOff by remember { mutableStateOf(false) }
     val chosen = subscriptions.map { it.url }.filterNot { it in excluded }.toSet()
@@ -126,11 +119,6 @@ private fun PickRow(title: String, subtitle: String, checked: Boolean, onToggle:
     }
 }
 
-/**
- * Окно переноса: пока идёт отправка или загрузка, его нельзя смахнуть —
- * полоска сверху незаметна, и человек закрывал приложение на полпути.
- * В конце — итог и кнопка «Готово».
- */
 @Composable
 internal fun TransferProgressDialog(state: VeilState) {
     val progress = state.transferProgress ?: return

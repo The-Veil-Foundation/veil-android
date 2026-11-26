@@ -10,10 +10,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-/**
- * Подписка-JSON: массив готовых конфигов Xray, по одному на страну, с
- * несколькими транспортами под балансировщиком. Значения вымышленные.
- */
 class SubscriptionConfigArrayTest {
 
     private val body = """
@@ -69,6 +65,28 @@ class SubscriptionConfigArrayTest {
     }
 
     @Test
+    fun userRulesAreAppliedToImportedConfigs() {
+        val options = TunnelOptions(rules = listOf(
+            RoutingRule(target = RuleTarget.Direct, domains = listOf("domain:example.org")),
+            RoutingRule(target = RuleTarget.Proxy, domains = listOf("domain:example.net")),
+        ))
+        val result = XrayConfig.build(node(), options)
+        val routing = result["routing"]!!.jsonObject
+        val rules = routing["rules"]!!.jsonArray
+        assertEquals("domain:example.org", rules[0].jsonObject["domain"]!!.jsonArray[0].jsonPrimitive.content)
+        val directTag = rules[0].jsonObject["outboundTag"]!!.jsonPrimitive.content
+        assertTrue(result["outbounds"]!!.jsonArray.any {
+            it.jsonObject["tag"]?.jsonPrimitive?.content == directTag &&
+                it.jsonObject["protocol"]?.jsonPrimitive?.content == "freedom"
+        })
+        assertEquals("auto", rules[1].jsonObject["balancerTag"]!!.jsonPrimitive.content)
+        assertEquals("auto", rules.last().jsonObject["balancerTag"]!!.jsonPrimitive.content)
+        assertEquals(2, result["outbounds"]!!.jsonArray.count {
+            it.jsonObject["tag"]?.jsonPrimitive?.content in listOf("A-REALITY", "A-TLS")
+        })
+    }
+
+    @Test
     fun `config array becomes one balanced node`() {
         val node = node()
         assertEquals("Тест · Эстония", node.name)
@@ -80,15 +98,14 @@ class SubscriptionConfigArrayTest {
         val text = XrayConfig.json(node(), TunnelOptions(geoAvailable = false))
         assertFalse("geoip:" in text, "geoip: оставил бы ядро без запуска")
         assertFalse("geosite:" in text, "geosite: оставил бы ядро без запуска")
-        // private заменён явными диапазонами, а не потерян.
+
         assertTrue("10.0.0.0/8" in text)
         assertTrue("domain:local" in text)
-        // Правило с одними geosite-тегами не должно превратиться в «всё подряд».
+
         assertFalse("category-ads" in text)
         val rules = Json.parseToJsonElement(text).jsonObject["routing"]!!.jsonObject["rules"]!!.jsonArray
         assertEquals(3, rules.size)
-        // Балансировщик и observatory остаются; слишком частые пробы подписки
-        // замедляются, чтобы не будить радио каждые 30 секунд.
+
         assertTrue("balancerTag" in text)
         assertTrue("leastLoad" in text)
     }
@@ -110,8 +127,7 @@ class SubscriptionConfigArrayTest {
     fun `provider balancer gets a fallback tag`() {
         val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
         val balancer = config["routing"]!!.jsonObject["balancers"]!!.jsonArray.single().jsonObject
-        // Первый выход под селектором: до первого замера observatory и при
-        // упавших пробах leastLoad иначе возвращает пустой тег.
+
         assertEquals("A-REALITY", balancer["fallbackTag"]?.jsonPrimitive?.content)
     }
 
@@ -119,7 +135,7 @@ class SubscriptionConfigArrayTest {
     fun `provider probes are slowed down for battery`() {
         val config = Json.parseToJsonElement(XrayConfig.json(node(), TunnelOptions())).jsonObject
         val observatory = config["observatory"]!!.jsonObject
-        // 30s из подписки: каждая проба — HTTPS-запрос через узел.
+
         assertEquals("3m", observatory["probeInterval"]!!.jsonPrimitive.content)
         assertEquals(2, observatory["subjectSelector"]!!.jsonArray.size)
     }
@@ -139,7 +155,7 @@ class SubscriptionConfigArrayTest {
             XrayConfig.json(parsed.nodes.single(), TunnelOptions()),
         ).jsonObject
         val ping = config["burstObservatory"]!!.jsonObject["pingConfig"]!!.jsonObject
-        // 10s × 3 = 30s между пачками — слишком часто; 180s / 3 = 60s.
+
         assertEquals("60s", ping["interval"]!!.jsonPrimitive.content)
     }
 
@@ -151,7 +167,7 @@ class SubscriptionConfigArrayTest {
         val sockopt = reality["streamSettings"]!!.jsonObject["sockopt"]!!.jsonObject
         assertEquals("60", sockopt["tcpKeepAliveIdle"]!!.jsonPrimitive.content)
         assertEquals("30", sockopt["tcpKeepAliveInterval"]!!.jsonPrimitive.content)
-        // freedom/blackhole не держат соединение с узлом — их не трогаем.
+
         val direct = outbounds.first { it["tag"]?.jsonPrimitive?.content == "direct" }
         assertTrue(direct["streamSettings"] == null)
     }

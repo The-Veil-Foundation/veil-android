@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -12,10 +13,9 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-/** Куда ядро смотрит за трафиком. */
 sealed interface XrayInbound {
     data class Tun(val name: String = "veil0", val mtu: Int = 1500) : XrayInbound
-    /** Если [user] задан, SOCKS и HTTP требуют логин и пароль: другие приложения на телефоне порт не используют. */
+
     data class LocalProxy(
         val socks: Int = 10808,
         val http: Int = 10809,
@@ -24,7 +24,6 @@ sealed interface XrayInbound {
     ) : XrayInbound
 }
 
-/** Настройки, которые влияют на конфиг туннеля. */
 data class TunnelOptions(
     val mtu: Int = 1500,
     val ipv6: Boolean = true,
@@ -34,34 +33,26 @@ data class TunnelOptions(
     val stats: Boolean = true,
     val inboundName: String = "veil0",
     val fragment: Boolean = false,
-    /** Какое ядро запускать: AUTO выбирает по протоколу узла. */
+
     val coreEngine: CoreEngine = CoreEngine.AUTO,
-    /** Упорядоченные правила: см. [AppSettings.effectiveRoutingRules]. */
+
     val rules: List<RoutingRule> = emptyList(),
-    /** Полные настройки DNS (null — использовать legacy [dnsServers]). */
+
     val dnsSettings: DnsSettings? = null,
-    /** Участники группы «самый быстрый»: строим leastPing-балансировщик. */
+
     val balancerMembers: List<ProxyConfig> = emptyList(),
-    /**
-     * Есть ли в каталоге ядра geoip.dat и geosite.dat. Без них правило с
-     * `geoip:`/`geosite:` не просто не сработает — ядро откажется стартовать
-     * («failed to open geoip.dat»), поэтому такие матчеры вырезаются.
-     */
+
     val geoAvailable: Boolean = false,
-    /** Все узлы: из них строятся выходы для правил «через этот узел». */
+
     val servers: List<ProxyConfig> = emptyList(),
-    /** Группы, на которые могут ссылаться правила. */
+
     val groups: List<ServerGroup> = emptyList(),
-    /** Rule-set, добавленные руками (sing-box). */
+
     val ruleSets: List<RuleSetRef> = emptyList(),
-    /** Секрет Clash API sing-box; пусто — API не поднимается. */
+
     val clashSecret: String = "",
 ) {
-    /**
-     * Опции для пробного ядра (пинг, проверка узла). Пробе достаточно дойти
-     * до сервера: правила ей не нужны, а rule-set заставили бы её качать
-     * наборы перед замером, и Clash API занял бы порт рабочего туннеля.
-     */
+
     fun forProbe(): TunnelOptions = copy(
         rules = emptyList(),
         ruleSets = emptyList(),
@@ -72,13 +63,6 @@ data class TunnelOptions(
     )
 }
 
-/**
- * Собирает Xray-JSON из [ProxyConfig].
- *
- * Порт `XrayConfigBuilder.swift`. В отличие от macOS, правило, которое
- * называет узел или группу, здесь получает собственный выход (или
- * балансировщик), а не сводится к единственному `proxy`.
- */
 object XrayConfig {
 
     const val TAG_PROXY = "proxy"
@@ -92,11 +76,10 @@ object XrayConfig {
         options: TunnelOptions = TunnelOptions(),
         inbound: XrayInbound = XrayInbound.Tun(options.inboundName, options.mtu),
     ): JsonObject {
-        // Подписка может нести готовый конфиг: сохраняем её маршруты и DNS,
-        // подменяя только inbounds — на Android пакеты приходят из нашего TUN.
+
         cfg.rawConfigJson?.let { raw ->
             val doc = runCatching { Json.parseToJsonElement(raw) as JsonObject }.getOrNull()
-            if (doc != null) return patchRaw(doc, options, inbound)
+            if (doc != null) return patchRaw(doc, options, inbound, cfg)
         }
 
         val dnsSettings = options.dnsSettings?.takeIf { it.enabled }
@@ -109,7 +92,7 @@ object XrayConfig {
             groups = options.groups,
             capable = { it.xrayCompatible },
         )
-        // «Самый быстрый» — балансировщик Xray; ручной выбор — его выбранный участник.
+
         val urltestGroups = graph.groups.filter { (group, members) ->
             group.kind == GroupKind.URLTEST && members.size > 1
         }
@@ -135,10 +118,7 @@ object XrayConfig {
             if (useBalancer) balancer.indices.forEach { add("bal-$it") }
             urltestGroups.forEach { (_, members) -> members.forEach { add(ProfileTags.server(it.id)) } }
         }.distinct()
-        // «Самый быстрый» выбирает выход только после первого замера
-        // observatory, а до него (и пока все замеры падают) leastPing
-        // возвращает пустой тег — ядро выбрасывает соединения. fallbackTag
-        // держит туннель живым: трафик идёт через выбранный узел группы.
+
         val proxyFallback = options.groups
             .asSequence()
             .filter { it.kind == GroupKind.URLTEST }
@@ -176,8 +156,7 @@ object XrayConfig {
                             put("outboundTag", TAG_DNS_OUT)
                         }
                     }
-                    // Первое совпавшее правило побеждает; порядок задаёт
-                    // AppSettings.effectiveRoutingRules (охрана LAN — внутри).
+
                     routingRules.forEach { add(it) }
                     addJsonObject {
                         put("type", "field")
@@ -241,18 +220,16 @@ object XrayConfig {
         }
     }
 
-    /** Конфиг из подписки: всё как есть, кроме log/inbounds/stats. */
     private fun patchRaw(
         doc: JsonObject,
         options: TunnelOptions,
         inbound: XrayInbound,
+        cfg: ProxyConfig,
     ): JsonObject {
         val mutable = doc.toMutableMap()
         mutable["log"] = logJson(options)
         mutable["inbounds"] = JsonArray(inboundList(inbound))
-        // Та же причина, что и у observatory: keepalive раз в 15 секунд
-        // держит радио активным даже на простое. Панели обычно не задают
-        // его вовсе, тогда Xray берёт агрессивный дефолт Go.
+
         (mutable["outbounds"] as? JsonArray)?.let { outbounds ->
             mutable["outbounds"] = withBatteryFriendlyKeepAlive(outbounds)
         }
@@ -260,32 +237,76 @@ object XrayConfig {
             (mutable["routing"] as? JsonObject)?.let { mutable["routing"] = withoutGeoRouting(it) }
             (mutable["dns"] as? JsonObject)?.let { mutable["dns"] = withoutGeoDns(it) }
         }
-        // Панель часто приносит свой policy без счётчиков: тогда спидометр
-        // видит нули при живом трафике. Включаем outbound-статистику, не
-        // трогая уровни и остальные настройки панели.
+
         if (options.stats) {
             if (mutable["stats"] !is JsonObject) mutable["stats"] = JsonObject(emptyMap())
             mutable["policy"] = withStatsPolicy(mutable["policy"] as? JsonObject)
         }
-        // Подписки любят проверять выходы каждые 10–30 секунд. Каждая проба —
-        // отдельный HTTPS-запрос через узел, и на мобильной сети это будит
-        // радио чаще, чем нужно для выбора узла.
+
         (mutable["observatory"] as? JsonObject)?.let {
             mutable["observatory"] = withBatteryFriendlyProbes(it, mutable["outbounds"] as? JsonArray)
         }
         (mutable["burstObservatory"] as? JsonObject)?.let {
             mutable["burstObservatory"] = withBatteryFriendlyBurst(it)
         }
-        // Балансировщик панели (leastPing/leastLoad) без fallbackTag
-        // выбрасывает соединения до первого замера observatory и тогда,
-        // когда все замеры временно упали. Подставляем живой выход.
+
         (mutable["routing"] as? JsonObject)?.let { routing ->
             mutable["routing"] = withBalancerFallback(routing, mutable["outbounds"] as? JsonArray)
+        }
+        if (options.rules.any { it.enabled && it.hasMatcher } || options.dnsSettings?.enabled == true) {
+            val generated = build(cfg.copy(rawConfigJson = null), options, inbound)
+            val originalOutbounds = (mutable["outbounds"] as? JsonArray).orEmpty()
+            val originalRouting = mutable["routing"] as? JsonObject ?: JsonObject(emptyMap())
+            val originalRules = (originalRouting["rules"] as? JsonArray).orEmpty()
+            var prefix = "veil:"
+            val occupied = originalOutbounds.mapNotNull { (it as? JsonObject)?.get("tag")?.jsonPrimitive?.content }
+            while (occupied.any { it.startsWith(prefix) }) prefix += "veil:"
+            fun namespaced(element: JsonElement, key: String = ""): JsonElement = when (element) {
+                is JsonObject -> JsonObject(element.mapValues { (k, v) -> namespaced(v, k) })
+                is JsonArray -> JsonArray(element.map { namespaced(it, key) })
+                is JsonPrimitive -> if (element.isString && key in setOf("tag", "outboundTag", "balancerTag", "fallbackTag", "selector", "subjectSelector"))
+                    JsonPrimitive(prefix + element.content) else element
+                else -> element
+            }
+            val added = namespaced(generated) as JsonObject
+            val addedRouting = added["routing"] as JsonObject
+
+            val defaultRoute = originalRules.filterIsInstance<JsonObject>().lastOrNull {
+                ("outboundTag" in it || "balancerTag" in it) &&
+                    it.keys.all { key -> key in setOf("type", "network", "outboundTag", "balancerTag") }
+            }
+            val addedRules = (addedRouting["rules"] as JsonArray).dropLast(1).filterNot {
+                (it as? JsonObject)?.get("outboundTag")?.jsonPrimitive?.content == prefix + TAG_DNS_OUT &&
+                    options.dnsSettings?.enabled != true
+            }.map { element ->
+                val rule = element as JsonObject
+                if (rule["outboundTag"]?.jsonPrimitive?.content == prefix + TAG_PROXY && defaultRoute != null) {
+                    JsonObject(rule.toMutableMap().apply {
+                        remove("outboundTag")
+                        defaultRoute["outboundTag"]?.let { put("outboundTag", it) }
+                        defaultRoute["balancerTag"]?.let { put("balancerTag", it) }
+                    })
+                } else rule
+            }
+            mutable["outbounds"] = JsonArray(originalOutbounds + (added["outbounds"] as JsonArray))
+            mutable["routing"] = JsonObject(originalRouting.toMutableMap().apply {
+                put("rules", JsonArray(addedRules + originalRules))
+                val balancers = (originalRouting["balancers"] as? JsonArray).orEmpty() +
+                    (addedRouting["balancers"] as? JsonArray).orEmpty()
+                if (balancers.isNotEmpty()) put("balancers", JsonArray(balancers))
+            })
+            (added["observatory"] as? JsonObject)?.let { extra ->
+                val existing = mutable["observatory"] as? JsonObject ?: extra
+                mutable["observatory"] = JsonObject(existing.toMutableMap().apply {
+                    put("subjectSelector", JsonArray(((existing["subjectSelector"] as? JsonArray).orEmpty() +
+                        (extra["subjectSelector"] as? JsonArray).orEmpty()).distinct()))
+                })
+            }
+            if (options.dnsSettings?.enabled == true) generated["dns"]?.let { mutable["dns"] = it }
         }
         return JsonObject(mutable)
     }
 
-    /** policy.system с включёнными счётчиками, остальное — как было. */
     private fun withStatsPolicy(policy: JsonObject?): JsonObject {
         val out = policy?.toMutableMap() ?: LinkedHashMap()
         val system = (out["system"] as? JsonObject)?.toMutableMap() ?: LinkedHashMap()
@@ -297,7 +318,6 @@ object XrayConfig {
 
     private val PROBE_DURATION_PART = Regex("(\\d+)(ms|h|m|s)")
 
-    /** Длительность из конфига Xray (`time.Duration`: "30s", "1m30s") в мс. */
     private fun parseProbeMillis(value: String?): Long? {
         if (value.isNullOrBlank()) return null
         if (value.trim() == "0") return 0
@@ -316,12 +336,10 @@ object XrayConfig {
         return if (matched) total else null
     }
 
-    /** Поднимаем слишком частые пробы подписки до безопасного минимума. */
     private fun withBatteryFriendlyProbes(observatory: JsonObject, outbounds: JsonArray?): JsonObject {
         val selectors = (observatory["subjectSelector"] as? JsonArray).orEmpty()
             .mapNotNull { (it as? JsonPrimitive)?.takeIf { value -> value.isString }?.content }
-        // Селектор Xray — префикс тега. Считаем реальные выходы, иначе
-        // «[""]» выглядит как один субъект, а проверяется весь список.
+
         val matched = if (selectors.isEmpty()) 0 else {
             proxyTags(outbounds).count { tag -> selectors.any { tag.startsWith(it) } }
         }
@@ -336,14 +354,9 @@ object XrayConfig {
         )
     }
 
-    /**
-     * burstObservatory для leastLoad проверяет выходы пачками: тик раз в
-     * `interval × sampling`. Если панель ставит интервал 10 секунд, суммарно
-     * получается слишком частый опрос — растягиваем его хотя бы до 3 минут.
-     */
     private fun withBatteryFriendlyBurst(observatory: JsonObject): JsonObject {
         val ping = observatory["pingConfig"] as? JsonObject ?: return observatory
-        // 0/пусто у Xray означает интервал по умолчанию (1 минута) — не трогаем.
+
         val interval = parseProbeMillis((ping["interval"] as? JsonPrimitive)?.content)
             ?.takeIf { it > 0 } ?: return observatory
         val sampling = (ping["sampling"] as? JsonPrimitive)?.content?.toIntOrNull()
@@ -362,7 +375,6 @@ object XrayConfig {
         )
     }
 
-    /** Теги выходов, которые реально несут пользовательский трафик. */
     private fun proxyTags(outbounds: JsonArray?): List<String> = outbounds.orEmpty().mapNotNull { element ->
         val outbound = element as? JsonObject ?: return@mapNotNull null
         val tag = (outbound["tag"] as? JsonPrimitive)?.content ?: return@mapNotNull null
@@ -370,10 +382,6 @@ object XrayConfig {
         if (protocol in NON_PROXY_PROTOCOLS) null else tag
     }
 
-    /**
-     * Keepalive для выходов подписки. Не трогаем явно выставленные большие
-     * значения, но не даём панели (или дефолту Go) пинговать чаще 60/30.
-     */
     private fun withBatteryFriendlyKeepAlive(outbounds: JsonArray): JsonArray {
         var changed = false
         val patched = outbounds.map { element ->
@@ -401,14 +409,8 @@ object XrayConfig {
         return if (changed) JsonArray(patched) else outbounds
     }
 
-    /** Протоколы, которые не несут пользовательский трафик наружу. */
     private val NON_PROXY_PROTOCOLS = setOf("freedom", "blackhole", "dns", "loopback")
 
-    /**
-     * fallbackTag для балансировщиков из подписки. Селекторы Xray — это
-     * префиксы тегов, поэтому берём первый реальный выход, подходящий под
-     * селектор. Уже заданный fallbackTag панели не перезаписываем.
-     */
     private fun withBalancerFallback(routing: JsonObject, outbounds: JsonArray?): JsonObject {
         val balancers = routing["balancers"] as? JsonArray ?: return routing
         val proxyTags = proxyTags(outbounds)
@@ -422,8 +424,7 @@ object XrayConfig {
             val selectors = (balancer["selector"] as? JsonArray).orEmpty()
                 .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
             if (selectors.isEmpty()) return@map element
-            // Селектор обычно префиксный; если он устарел и ничего не
-            // находит, всё равно даём балансировщику живой выход.
+
             val fallback = proxyTags.firstOrNull { tag -> selectors.any { tag.startsWith(it) } }
                 ?: proxyTags.first()
             changed = true
@@ -433,31 +434,21 @@ object XrayConfig {
         else JsonObject(routing.toMutableMap().apply { put("balancers", JsonArray(patched)) })
     }
 
-    /* ---------------- geo-матчеры без базы ---------------- */
-
-    /** То, что значит `geoip:private`, перечисленное явно. */
     private val PRIVATE_NETWORKS = listOf(
         "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
         "127.0.0.0/8", "fc00::/7", "fe80::/10", "::1/128",
     )
 
-    /** Домены из `geosite:private`: имена, которые существуют только в локальной сети. */
     private val PRIVATE_DOMAINS = listOf(
         "full:localhost", "domain:local", "domain:localdomain", "domain:lan", "domain:home.arpa",
     )
 
-    /** Поля правила, где допустимы geo-матчеры. */
     private val GEO_RULE_FIELDS = listOf("domain", "domains", "ip", "source", "sourceIP", "localIP")
 
     private fun isGeoToken(token: String) =
         token.startsWith("geoip:") || token.startsWith("geosite:") ||
             token.startsWith("ext:") || token.startsWith("ext-ip:") || token.startsWith("ext-domain:")
 
-    /**
-     * Список матчеров без geo-токенов. `private` заменяется явными значениями,
-     * остальные geo-токены убираются. null — в списке остались только они:
-     * без них правило превратилось бы в «всё подряд».
-     */
     private fun withoutGeoTokens(list: JsonArray): JsonArray? {
         var touched = false
         val out = ArrayList<JsonElement>()
@@ -480,7 +471,6 @@ object XrayConfig {
         return if (out.isEmpty() && touched) null else JsonArray(out)
     }
 
-    /** Правило без geo-матчеров; null — убрать его целиком, чтобы оно не расширилось. */
     private fun withoutGeoRule(rule: JsonObject): JsonObject? {
         val out = rule.toMutableMap()
         for (field in GEO_RULE_FIELDS) {
@@ -505,7 +495,7 @@ object XrayConfig {
                     val copy = server.toMutableMap()
                     for (field in listOf("domains", "expectIPs", "expectedIPs", "unexpectedIPs")) {
                         val list = server[field] as? JsonArray ?: continue
-                        // Резолвер, который отвечал только за geo-список, убираем целиком.
+
                         copy[field] = withoutGeoTokens(list) ?: return@mapNotNull null
                     }
                     JsonObject(copy)
@@ -523,9 +513,7 @@ object XrayConfig {
         put("access", if (options.logLevel == "debug") "" else "none")
         options.logFile?.takeIf { it.isNotEmpty() }?.let {
             put("error", it)
-            // Access-лог — строка на диск на каждое соединение, и файл растёт
-            // без ротации. Экран логов его не читает, поэтому пишем только в
-            // отладке, иначе в фоне это постоянная запись и лишний расход.
+
             if (options.logLevel == "debug") put("access", "$it.access")
         }
     }
@@ -602,8 +590,6 @@ object XrayConfig {
         options: TunnelOptions = TunnelOptions(),
         inbound: XrayInbound = XrayInbound.Tun(options.inboundName, options.mtu),
     ): String = Json.encodeToString(JsonObject.serializer(), build(cfg, options, inbound))
-
-    /* ---------------- outbounds ---------------- */
 
     fun outbound(cfg: ProxyConfig, tag: String, options: TunnelOptions = TunnelOptions()): JsonObject {
         fun JsonObject.withTag(): JsonObject = JsonObject(toMutableMap().apply { put("tag", kotlinx.serialization.json.JsonPrimitive(tag)) })
@@ -717,14 +703,11 @@ object XrayConfig {
         }
     }
 
-    /* ---------------- transport + security ---------------- */
-
     private fun streamSettings(cfg: ProxyConfig, options: TunnelOptions = TunnelOptions()): JsonObject = buildJsonObject {
         put("network", cfg.network.wire)
 
         if (options.fragment) {
-            // Xray 26: маски живут в streamSettings.finalmask, а не в заголовке TCP.
-            // Режем первые пакеты (ClientHello) — DPI не видит цельный SNI.
+
             putJsonObject("finalmask") {
                 putJsonArray("tcp") {
                     addJsonObject {
@@ -740,8 +723,7 @@ object XrayConfig {
         }
         putJsonObject("sockopt") {
             put("tcpNoDelay", true)
-            // Редкие keepalive меньше будят радио на мобильной сети. 60/30
-            // всё ещё переживает NAT оператора, но не пингует каждые 15 секунд.
+
             put("tcpKeepAliveIdle", 60)
             put("tcpKeepAliveInterval", 30)
         }

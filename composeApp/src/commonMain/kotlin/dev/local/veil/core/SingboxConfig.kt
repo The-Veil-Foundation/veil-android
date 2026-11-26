@@ -2,19 +2,12 @@ package dev.local.veil.core
 
 import kotlinx.serialization.json.*
 
-/**
- * Генератор конфига для sing-box ядра.
- * 
- * Формат: https://sing-box.sagernet.org/configuration/
- * sing-box использует упрощённую структуру по сравнению с Xray.
- */
 object SingboxConfig {
 
     const val TAG_PROXY = "proxy"
     const val TAG_DIRECT = "direct"
     const val TAG_BLOCK = "block"
 
-    /** Куда sing-box смотрит за трафиком: рабочий TUN или локальный SOCKS для проверки. */
     sealed interface Inbound {
         data class Tun(val name: String = "veil0", val mtu: Int = 1500) : Inbound
         data class LocalProxy(
@@ -40,9 +33,7 @@ object SingboxConfig {
         )
         val rules = options.rules.filter { it.enabled }
         val tun = inbound is Inbound.Tun
-        // `clash_mode` читает режим у Clash API, поэтому API включается сам,
-        // как только он нужен хоть одному правилу. Только в туннеле и только
-        // с секретом: иначе любое приложение на телефоне видит соединения.
+
         val clashApi = tun && options.clashSecret.isNotBlank() && rules.any { it.clashMode.isNotBlank() }
 
         return buildJsonObject {
@@ -100,8 +91,7 @@ object SingboxConfig {
                             if (options.ipv6) add("${TunAddress.IPV6}/${TunAddress.IPV6_PREFIX}")
                         }
                         put("mtu", inbound.mtu)
-                        // TUN создаёт VpnService (маршруты, DNS и split-tunnel
-                        // уже настроены), ядру остаётся только fd.
+
                         put("auto_route", false)
                         put("strict_route", false)
                         put("stack", "gvisor")
@@ -151,8 +141,7 @@ object SingboxConfig {
 
             putJsonObject("route") {
                 putJsonArray("rules") {
-                    // Сниффинг с 1.12 — действие правила; первым он нужен, чтобы
-                    // доменные правила работали и для соединений по голому IP.
+
                     addJsonObject { put("action", "sniff") }
                     if (tun) {
                         addJsonObject {
@@ -163,11 +152,7 @@ object SingboxConfig {
                     rules.forEach { rule -> routeRule(rule, graph)?.let { add(it) } }
                 }
                 put("final", TAG_PROXY)
-                // DNS-правила говорят на том же диалекте: `geosite:` там тоже
-                // требует объявленного rule-set, иначе ядро не стартует.
-                // Наборы качаются через прокси: без них ядро не стартует, а
-                // raw.githubusercontent.com напрямую доступен не везде.
-                // Скачанное хранит cache_file, и следующие старты сеть не ждут.
+
                 val sets = RuleSetCatalog.derive(
                     rules = rules,
                     dnsRules = dnsSettings?.rules.orEmpty(),
@@ -175,19 +160,15 @@ object SingboxConfig {
                     downloadDetour = TAG_PROXY,
                 ).mapNotNull { it.json() }
                 if (sets.isNotEmpty()) put("rule_set", JsonArray(sets))
-                // С 1.12 выходу с доменным адресом нужен резолвер по умолчанию.
+
                 if (dnsSettings != null) put("default_domain_resolver", dnsSettings.bootstrapTag)
-                // Не привязываем сокеты к конкретному интерфейсу: на Android
-                // SO_BINDTODEVICE без root часто даёт "dial rmnet_data0: i/o timeout".
-                // Приложение и так исключено из собственного VPN, поэтому обычный
-                // маршрут ОС — правильный путь наружу.
+
                 put("auto_detect_interface", false)
             }
 
             if (tun) {
                 putJsonObject("experimental") {
-                    // Кэш rule-set и выборов селекторов. Только у туннеля: два
-                    // экземпляра на одном bbolt-файле ждали бы блокировку.
+
                     putJsonObject("cache_file") { put("enabled", true) }
                     if (clashApi) {
                         putJsonObject("clash_api") {
@@ -201,11 +182,6 @@ object SingboxConfig {
         }
     }
 
-    /**
-     * Одно правило как route-правило sing-box, или null, если матчить нечего.
-     * Цель, выход которой не построен, падает на `proxy`: правило просило
-     * прокси, не хватает лишь названного узла или группы.
-     */
     fun routeRule(rule: RoutingRule, graph: OutboundGraph? = null): JsonObject? {
         if (!rule.enabled || !rule.hasMatcher) return null
         val tag = graph?.tagFor(rule.target)
@@ -232,14 +208,13 @@ object SingboxConfig {
             }
             stringArray(if (sourceSide) "source_port_range" else "port_range", ranges)
 
-            // На Android процесс — это пакет приложения.
             stringArray("package_name", rule.processNames)
             if (rule.network.isNotBlank()) put("network", rule.network)
             stringArray("protocol", rule.protocols)
             if (rule.clashMode.isNotBlank()) put("clash_mode", rule.clashMode)
             stringArray("rule_set", ruleSetTags.distinct())
         }
-        // Всё выше могло не дать ни одного матчера (только `ext:`-домены, например).
+
         if (matchers.isEmpty()) return null
         return JsonObject(
             matchers.toMutableMap().apply {
@@ -291,7 +266,6 @@ object SingboxConfig {
         }
     }
 
-    /** DNS-детур на узел или группу, которых нет в конфиге, уходит в `proxy`. */
     private fun OutboundGraph.detourTag(detour: String): String =
         if ((detour.startsWith("srv-") || detour.startsWith("grp-")) && detour !in tags) TAG_PROXY else detour
 
@@ -305,11 +279,6 @@ object SingboxConfig {
         options.logFile?.let { put("output", it) }
     }
 
-    /**
-     * Выход узла. [fragment] — та же защита от DPI, что finalmask у Xray:
-     * ClientHello режется на куски, и цельный SNI не виден. Без неё на
-     * сетях с DPI соединение сбрасывается ещё на рукопожатии.
-     */
     internal fun outbound(cfg: ProxyConfig, tag: String, fragment: Boolean = false): JsonObject {
         val base = baseOutbound(cfg, tag)
         if (!fragment) return base
@@ -326,10 +295,9 @@ object SingboxConfig {
                 put("type", "vless")
                 put("server", cfg.address)
                 put("server_port", cfg.port)
-                put("uuid", cfg.id)
+                put("uuid", cfg.uuid.orEmpty())
                 cfg.flow?.takeIf { it.isNotBlank() }?.let { put("flow", it) }
 
-                // Transport
                 when (cfg.network) {
                     TransportNetwork.WS -> {
                         putJsonObject("transport") {
@@ -356,7 +324,7 @@ object SingboxConfig {
                         }
                     }
                     TransportNetwork.XHTTP -> {
-                        // sing-box doesn't support xhttp yet, fallback to tcp
+
                         putJsonObject("transport") {
                             put("type", "http")
                             cfg.path?.let { put("path", it) }
@@ -364,11 +332,10 @@ object SingboxConfig {
                         }
                     }
                     else -> {
-                        // TCP or unsupported
+
                     }
                 }
 
-                // TLS
                 when (cfg.security) {
                     StreamSecurity.TLS -> {
                         putJsonObject("tls") {
@@ -378,7 +345,7 @@ object SingboxConfig {
                                 putJsonArray("alpn") { alpn.forEach { add(it) } }
                             }
                             cfg.allowInsecure.let { put("insecure", it) }
-                            // Отпечаток браузера: sing-box включает uTLS только явно.
+
                             cfg.fingerprint?.let { fp ->
                                 putJsonObject("utls") {
                                     put("enabled", true)
@@ -396,8 +363,7 @@ object SingboxConfig {
                                 cfg.shortId?.let { put("short_id", it) }
                             })
                             cfg.sni?.let { put("server_name", it) }
-                            // REALITY без uTLS sing-box не запускает вообще:
-                            // "uTLS is required by reality client".
+
                             putJsonObject("utls") {
                                 put("enabled", true)
                                 put("fingerprint", cfg.fingerprint ?: "chrome")
@@ -406,7 +372,7 @@ object SingboxConfig {
                         }
                     }
                     else -> {
-                        // No TLS
+
                     }
                 }
             }
@@ -415,10 +381,9 @@ object SingboxConfig {
                 put("type", "vmess")
                 put("server", cfg.address)
                 put("server_port", cfg.port)
-                put("uuid", cfg.id)
+                put("uuid", cfg.uuid.orEmpty())
                 put("alter_id", cfg.alterId ?: 0)
 
-                // Transport
                 when (cfg.network) {
                     TransportNetwork.WS -> {
                         putJsonObject("transport") {
@@ -445,11 +410,10 @@ object SingboxConfig {
                         }
                     }
                     else -> {
-                        // TCP or unsupported transport
+
                     }
                 }
 
-                // TLS
                 if (cfg.security == StreamSecurity.TLS) {
                     putJsonObject("tls") {
                         put("enabled", true)
@@ -474,7 +438,6 @@ object SingboxConfig {
                 put("server_port", cfg.port)
                 put("password", cfg.password ?: "")
 
-                // Transport
                 when (cfg.network) {
                     TransportNetwork.WS -> {
                         putJsonObject("transport") {
@@ -501,11 +464,10 @@ object SingboxConfig {
                         }
                     }
                     else -> {
-                        // TCP or unsupported transport: no transport block
+
                     }
                 }
 
-                // TLS
                 putJsonObject("tls") {
                     put("enabled", true)
                     cfg.sni?.let { put("server_name", it) }
@@ -560,13 +522,12 @@ object SingboxConfig {
             }
 
             else -> {
-                // Fallback: direct
+
                 put("type", "direct")
             }
         }
     }
 
-    /** Общий TLS-блок для QUIC-протоколов и AnyTLS. */
     private fun JsonObjectBuilder.tlsFields(cfg: ProxyConfig) {
         put("enabled", true)
         cfg.sni?.let { put("server_name", it) }

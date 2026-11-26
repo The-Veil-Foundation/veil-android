@@ -49,7 +49,8 @@ class VeilState(
     private val container: AppContainer,
     private val scope: CoroutineScope,
 ) {
-    // Ленивая загрузка для ускорения старта: серверы/подписки грузим в фоне.
+    val openNotificationSettings: (() -> Unit)? get() = container.openNotificationSettings
+
     var settings by mutableStateOf(container.settings.load().migrated())
         private set
     var servers by mutableStateOf<List<ProxyConfig>>(emptyList())
@@ -58,8 +59,7 @@ class VeilState(
         private set
     var selectedId by mutableStateOf<String?>(null)
         private set
-    
-    /** Скачанные готовые списки: домены, подсети и время обновления. */
+
     data class CommunityCache(
         val domains: List<String> = emptyList(),
         val ips: List<String> = emptyList(),
@@ -79,11 +79,10 @@ class VeilState(
     private val communityDirectory: String get() = "${container.geoDirectory}/community"
 
     init {
-        // Загрузчик подписок хранит UA отдельно: держим его в согласии с настройками.
+
         container.subscriptions.userAgent = settings.userAgent
         scope.launch(Dispatchers.IO) {
-            // Не сканируем весь каталог списков при старте. На ТВ это могло
-            // прочитать десятки тысяч строк ещё до появления первого кадра.
+
             val loadedSettings = container.settings.load()
             val s = container.store.load()
             val subs = container.store.loadSubscriptions()
@@ -113,12 +112,12 @@ class VeilState(
         private set
     var pingMode by mutableStateOf(PingMode.REAL)
         private set
-    /** Сколько серверов уже измерено из скольких — для индикатора. */
+
     var pingProgress by mutableStateOf(0 to 0)
         private set
     private var pingJob: Job? = null
     var pinging by mutableStateOf(false)
-    /** Узлы, которые реально замешиваются сейчас: анимация только у них. */
+
     var pingingIds by mutableStateOf<Set<String>>(emptySet())
         private set
     var busy by mutableStateOf(false)
@@ -126,34 +125,62 @@ class VeilState(
     private var connectJob: kotlinx.coroutines.Job? = null
     private var switchJob: kotlinx.coroutines.Job? = null
 
-    /** Идёт проверка узла перед подключением. */
     var checking by mutableStateOf(false)
         private set
-    /** Какой узел проверяем — для подписи в статус-карточке. */
+
     var checkingServer by mutableStateOf<ProxyConfig?>(null)
         private set
-    /** Доступное обновление и прогресс его загрузки. */
+
     var update by mutableStateOf<dev.local.veil.platform.AppRelease?>(null)
         private set
     var updateProgress by mutableStateOf<Float?>(null)
         private set
     val appVersion: String get() = container.update.currentVersion
 
-    /** Всплывающее сообщение внизу экрана (тост-буллетин). */
     var bulletin by mutableStateOf<Bulletin?>(null)
         private set
     var apps by mutableStateOf<List<AppEntry>>(emptyList())
         private set
 
-    /** Загружены ли geoip.dat/geosite.dat в каталог ядра. */
     var geoAvailable by mutableStateOf(container.geo.hasAssets)
         private set
     var geoBusy by mutableStateOf(false)
         private set
+    var geoProgress by mutableStateOf<dev.local.veil.platform.GeoDownloadProgress?>(null)
+        private set
+    var geoError by mutableStateOf<String?>(null)
+        private set
+    var routingError by mutableStateOf<String?>(null)
+        private set
+    private var routingApplyJob: Job? = null
+    private var routingApplyPending = false
+
+    fun applyRouting() {
+        routingApplyPending = true
+        if (routingApplyJob?.isActive == true) return
+        routingApplyJob = scope.launch {
+            while (routingApplyPending) {
+                routingApplyPending = false
+                kotlinx.coroutines.delay(400)
+                switchJob?.join()
+                connectJob?.join()
+
+                kotlinx.coroutines.withTimeoutOrNull(30_000) {
+                    while (container.vpn.status.value.isBusy) kotlinx.coroutines.delay(100)
+                }
+                if (!container.vpn.status.value.isConnected) return@launch
+                val server = selected ?: return@launch
+                routingError = null
+                container.vpn.reconnect(server, tunnelOptions()).onFailure {
+                    routingError = it.message ?: tr("Не удалось применить правила", "Could not apply rules")
+                    showBulletin(routingError!!, BulletinKind.ERROR)
+                }
+            }
+        }
+    }
     var appsLoading by mutableStateOf(false)
         private set
 
-    /** Группа, через которую подключаемся: её id лежит в selectedId. */
     val activeGroup: ServerGroup?
         get() = settings.groups.firstOrNull { it.id == selectedId }
 
@@ -163,19 +190,12 @@ class VeilState(
             return servers.firstOrNull { it.id == selectedId } ?: servers.firstOrNull()
         }
 
-    /**
-     * Узлы без пометки «скрыт» — их показывают списки. Скрытие источника
-     * целиком ушло вместе со старым экраном «Источники» (на macOS его нет),
-     * поэтому старый флаг [Subscription.hidden] больше ничего не прячет.
-     */
     val visibleServers: List<ProxyConfig>
         get() = servers.filter { settings.annotations[it.id]?.hidden != true }
 
-    /** Источники в порядке показа: закреплённые сверху, дальше как расставлены. */
     val orderedSubscriptions: List<Subscription>
         get() = subscriptions.filter { it.pinned } + subscriptions.filterNot { it.pinned }
 
-    /** Настройки туннеля с учётом пресета, правил, DNS и активной группы. */
     private fun tunnelOptions(logFile: String? = null): TunnelOptions =
         settings.toTunnelOptions(
             logFile = logFile,
@@ -186,24 +206,21 @@ class VeilState(
         )
 
     val coreAvailable: Boolean get() = container.vpn.coreAvailable
-    /** HWID устройства; состояние, чтобы экран обновлялся после смены. */
+
     var deviceId by mutableStateOf(container.subscriptions.deviceId)
         private set
 
-    /** Что уйдёт в `X-Hwid` для этого источника: null — не слать. */
     fun hwidFor(subscription: Subscription?): String? {
         val send = subscription?.sendHwid ?: settings.sendHwid
         if (!send) return null
         return subscription?.hwid?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } ?: deviceId
     }
 
-    /** Новый HWID: для панелей это новое устройство. */
     fun regenerateDeviceId() {
         deviceId = container.subscriptions.regenerateDeviceId()
         showBulletin(tr("Новый ID устройства: $deviceId", "New device ID: $deviceId"), BulletinKind.SUCCESS)
     }
 
-    /** HWID от провайдера, как есть. false — пусто, ничего не изменилось. */
     fun setDeviceId(raw: String): Boolean {
         val value = container.subscriptions.setDeviceId(raw) ?: return false
         deviceId = value
@@ -211,9 +228,6 @@ class VeilState(
     }
     val coreVersion: String? get() = container.vpn.coreVersion
 
-    /* ---------------- выбор и настройки ---------------- */
-
-    /** Подключение при запуске приложения, если так задано в настройках. */
     fun autoConnectOnLaunch(status: VpnStatus) {
         if (!settings.autoConnect) return
         if (selected == null) return
@@ -238,11 +252,10 @@ class VeilState(
             if (switchJob?.isActive == true) return
             switchJob = scope.launch {
                 val options = tunnelOptions()
-                // Переключаемся сразу, без предварительной проверки узла.
+
                 val target = server
                 container.vpn.reconnect(target, options).onFailure {
-                    // Если новый узел не поднялся — возвращаемся на прежний,
-                    // чтобы не оставить пользователя без туннеля.
+
                     val back = servers.firstOrNull { it.id == previous }
                     if (back != null && back.id != target.id) {
                         selectedId = back.id
@@ -257,14 +270,17 @@ class VeilState(
         }
     }
 
+    val sharing get() = container.sharing
+
     fun saveSettings(next: AppSettings) {
+        dev.local.veil.core.AppLog.event("Settings saved")
+        val routingChanged = settings.routingFingerprint != next.routingFingerprint
         settings = next
         container.settings.save(next)
         container.subscriptions.userAgent = next.userAgent
         ensureGeo()
+        if (routingChanged) applyRouting()
     }
-
-    /* ---------------- маршрутизация, группы, заметки ---------------- */
 
     fun saveRouting(preset: RoutingPreset, rules: List<RoutingRule>, blockAds: Boolean) {
         saveSettings(settings.copy(routingPreset = preset, customRules = rules, blockAds = blockAds))
@@ -274,7 +290,6 @@ class VeilState(
         saveSettings(settings.copy(dnsSettings = dns))
     }
 
-    /** Меняет подписки местами: -1 выше, +1 ниже. */
     fun moveSubscription(url: String, delta: Int) {
         val list = subscriptions.toMutableList()
         val index = list.indexOfFirst { it.url == url }
@@ -297,7 +312,6 @@ class VeilState(
         saveGroups(next)
     }
 
-    /** Выбирает активный узел группы ручного выбора. */
     fun selectGroupMember(groupId: String, serverId: String) {
         val group = settings.groups.firstOrNull { it.id == groupId } ?: return
         if (group.kind != GroupKind.SELECTOR) return
@@ -307,7 +321,6 @@ class VeilState(
         }
     }
 
-    /** Пинг всех участников группы. */
     fun pingGroup(group: ServerGroup) = pingTargets(group.members(servers))
 
     fun removeGroup(id: String) {
@@ -318,8 +331,6 @@ class VeilState(
             fallback?.let { container.store.saveSelectedId(it) }
         }
     }
-
-    /* ---------------- готовые списки ---------------- */
 
     private val communityLanguage: dev.local.veil.core.AppLanguage
         get() = when (settings.language) {
@@ -345,12 +356,10 @@ class VeilState(
         saveSettings(settings.copy(communityListTarget = target))
     }
 
-    /** Правила, в которые разворачиваются выбранные списки. */
-    fun communityRules(): List<RoutingRule> = settings.communityLists.mapNotNull { id ->
-        val list = CommunityCatalog.list(id) ?: return@mapNotNull null
-        val cache = communityCache[id] ?: return@mapNotNull null
-        if (cache.isEmpty) return@mapNotNull null
-        RoutingRule(
+    fun communityRules(): List<RoutingRule> = settings.communityLists.flatMap { id ->
+        val list = CommunityCatalog.list(id) ?: return@flatMap emptyList()
+        val cache = communityCache[id] ?: return@flatMap emptyList()
+        dev.local.veil.core.communityRoutingRules(
             id = "community:$id",
             name = list.title(communityLanguage),
             target = settings.communityListTarget,
@@ -359,13 +368,13 @@ class VeilState(
         )
     }
 
-    /** Обновляет выбранные списки (по умолчанию все выбранные). */
     fun refreshCommunity(ids: List<String> = settings.communityLists) {
         val todo = ids.filter { CommunityCatalog.list(it) != null }
         if (todo.isEmpty() || communityBusy.isNotEmpty()) return
         communityError = null
         communityBusy = todo.toSet()
         scope.launch {
+            try {
             for (id in todo) {
                 val list = CommunityCatalog.list(id) ?: continue
                 val domainsText = fetchText(CommunityCatalog.rawUrl(list.domainPath))
@@ -374,14 +383,22 @@ class VeilState(
                     continue
                 }
                 val domains = parseCommunityDomains(domainsText)
+                var missingIpList = false
                 val ips = buildList {
                     list.ipv4Path?.let { path ->
-                        fetchText(CommunityCatalog.rawUrl(path))?.let { addAll(parseCommunityCidrs(it)) }
+                        val text = fetchText(CommunityCatalog.rawUrl(path))
+                        if (text == null) missingIpList = true else addAll(parseCommunityCidrs(text))
                     }
                     list.ipv6Path?.let { path ->
-                        fetchText(CommunityCatalog.rawUrl(path))?.let { addAll(parseCommunityCidrs(it)) }
+                        val text = fetchText(CommunityCatalog.rawUrl(path))
+                        if (text == null) missingIpList = true else addAll(parseCommunityCidrs(text))
                     }
                 }.distinct()
+                if (missingIpList) {
+                    communityError = tr("Не удалось скачать IP-часть списка. Сохранена предыдущая версия.",
+                        "Could not download the IP list. The previous version was kept.")
+                    continue
+                }
                 if (domains.isEmpty() && ips.isEmpty()) {
                     communityError = tr(
                         "Список «${list.title(communityLanguage)}» пришёл пустым",
@@ -395,11 +412,11 @@ class VeilState(
                 writeTextFile("$communityDirectory/$id.time", entry.updated.toString())
                 communityCache = communityCache + (id to entry)
             }
-            communityBusy = emptySet()
+            applyRouting()
+            } finally { communityBusy = emptySet() }
         }
     }
 
-    /** Обновляет выбранные списки, если они старше суток. */
     fun refreshCommunityDue() {
         val stale = settings.communityLists.filter { id ->
             val updated = communityCache[id]?.updated ?: 0L
@@ -415,6 +432,7 @@ class VeilState(
             deleteFile("$communityDirectory/${list.id}.time")
         }
         communityCache = emptyMap()
+        applyRouting()
         showBulletin(
             tr("Кэш списков очищен", "List cache cleared"),
             BulletinKind.SUCCESS,
@@ -422,8 +440,10 @@ class VeilState(
     }
 
     private suspend fun fetchText(url: String): String? = withContext(Dispatchers.IO) {
-        // Готовые списки лежат на GitHub: HWID туда слать незачем.
-        runCatching { container.subscriptions.fetch(url, hwid = null).getOrThrow().body }.getOrNull()
+
+        try { container.subscriptions.fetch(url, hwid = null).getOrThrow().body }
+        catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+        catch (_: Exception) { null }
     }
 
     private fun parseCommunityDomains(text: String): List<String> = text.lineSequence()
@@ -446,7 +466,6 @@ class VeilState(
     fun annotationFor(serverId: String): NodeAnnotation =
         settings.annotations[serverId] ?: NodeAnnotation()
 
-    /** Имя узла с учётом пользовательской замены. */
     fun displayName(server: ProxyConfig): String =
         annotationFor(server.id).nameOverride.ifBlank { server.name }
 
@@ -460,34 +479,37 @@ class VeilState(
         saveAnnotation(serverId, annotationFor(serverId).copy(hidden = hidden))
     }
 
-    /**
-     * Тихо скачивает geo-базу, если настройкам она нужна, а её нет. Кнопки
-     * «Скачать базу» больше нет, поэтому сообщаем только об ошибке.
-     */
     fun ensureGeo() {
         if (settings.needsGeoAssets && !geoAvailable && !geoBusy && !geoAutoFailed) downloadGeo()
     }
 
-    /**
-     * Неудачная автозагрузка не повторяется до следующего запуска: иначе
-     * каждое сохранение настроек показывало бы ту же ошибку.
-     */
     private var geoAutoFailed = false
 
-    /** Скачивает базу правил выбранного источника. */
-    private fun downloadGeo() {
+    fun downloadGeo() {
         if (geoBusy) return
         geoBusy = true
+        geoError = null
+        geoProgress = null
+        geoAutoFailed = false
+        val requested = settings
         scope.launch {
-            container.geo.download(settings.geoSource, settings.customGeoipUrl, settings.customGeositeUrl)
+            try {
+            container.geo.downloadWithProgress(requested.geoSource, requested.customGeoipUrl, requested.customGeositeUrl) { progress ->
+                scope.launch { geoProgress = progress }
+            }
                 .onSuccess {
-                    geoAvailable = true
+                    geoAvailable = container.geo.hasAssets
+                    applyRouting()
                 }
                 .onFailure { error ->
                     geoAutoFailed = true
-                    showBulletin(error.message ?: tr("Не удалось скачать базу правил", "Could not download the rule database"), BulletinKind.ERROR)
+                    geoError = error.message ?: tr("Не удалось скачать базу правил", "Could not download the rule database")
+                    showBulletin(geoError!!, BulletinKind.ERROR)
                 }
-            geoBusy = false
+            } finally {
+                geoBusy = false
+                geoAvailable = container.geo.hasAssets
+            }
         }
     }
 
@@ -503,12 +525,10 @@ class VeilState(
 
     fun clearError() = container.vpn.clearError()
 
-    /* ---------------- пинг ---------------- */
-
     fun choosePingMode(mode: PingMode) {
         if (pinging || mode == pingMode) return
         pingMode = mode
-        pings = emptyMap() // цифры разных методов нельзя смешивать
+        pings = emptyMap()
     }
 
     fun cancelPing() {
@@ -519,7 +539,6 @@ class VeilState(
 
     fun pingAll() = pingTargets(visibleServers)
 
-    /** Пинг одной подписки (или группы «Вручную», если [source] == null). */
     fun pingSource(source: String?) = pingTargets(servers.filter { it.source == source })
 
     fun pingOne(server: ProxyConfig) = pingTargets(listOf(server))
@@ -532,7 +551,7 @@ class VeilState(
             return
         }
         pinging = true
-        // Старые цифры других групп остаются: замер идёт только по выбранным.
+
         val ids = targets.map { it.id }.toSet()
         pingingIds = ids
         pings = pings.filterKeys { it !in ids }
@@ -556,8 +575,7 @@ class VeilState(
                         pingProgress = targets.size to targets.size
                     }
                     PingMode.REAL -> {
-                        // Одно пробное ядро на пачку узлов, запросы параллельно:
-                        // результаты появляются по мере ответа.
+
                         var done = 0
                         container.vpn.realPingBatch(targets, options, timeoutMs = 3000) { id, value ->
                             withContext(Dispatchers.Main) {
@@ -575,8 +593,6 @@ class VeilState(
             }
         }
     }
-
-    /* ---------------- раздельный туннель ---------------- */
 
     fun loadApps() {
         if (apps.isNotEmpty() || appsLoading) return
@@ -608,16 +624,10 @@ class VeilState(
 
     private var splitSnapshot: Pair<SplitMode, Set<String>>? = null
 
-    /** Экран выбора открыт: запоминаем исходное состояние, чтобы понять, менялось ли оно. */
     fun beginSplitEdit() {
         splitSnapshot = settings.splitMode to settings.splitPackages
     }
 
-    /**
-     * Экран закрыт. TUN создаётся один раз при подключении, поэтому изменения
-     * применяются только пересозданием интерфейса: раньше их приходилось
-     * подтверждать ручным переподключением.
-     */
     fun finishSplitEdit() {
         val before = splitSnapshot ?: return
         splitSnapshot = null
@@ -646,16 +656,6 @@ class VeilState(
         saveSettings(settings.copy(splitPackages = next))
     }
 
-    /* ---------------- подписки ---------------- */
-
-    /**
-     * Один вход: ссылка на подписку, тело подписки, ссылки нод или wg-conf.
-     */
-    /**
-     * Добавление из листа «Добавить»: ждёт загрузки подписки, чтобы лист мог
-     * показать ошибку на месте, а не закрыться и потерять вставленный текст.
-     * Возвращает текст ошибки или null.
-     */
     suspend fun submitAdd(input: String, name: String = ""): String? {
         val text = input.trim()
         Pairing.parse(text)?.let {
@@ -678,7 +678,7 @@ class VeilState(
 
     fun addInput(input: String) {
         val text = input.trim()
-        // QR приставки: не подписка, а предложение отправить подписки на неё.
+
         Pairing.parse(text)?.let {
             pendingPairing = it
             return
@@ -720,13 +720,11 @@ class VeilState(
             )
     }
 
-    /** Меняет один источник и сохраняет список. */
     fun updateSubscription(url: String, transform: (Subscription) -> Subscription) {
         subscriptions = subscriptions.map { if (it.url == url) transform(it) else it }
         container.store.saveSubscriptions(subscriptions)
     }
 
-    /** Копия узла в «Вручную», где его можно менять, не трогая подписку. */
     fun duplicateToManual(server: ProxyConfig) {
         val copy = server.copy(id = newId(), source = null, name = server.name + tr(" (копия)", " (copy)"))
         servers = servers + copy
@@ -734,16 +732,14 @@ class VeilState(
         showBulletin(tr("Копия добавлена во «Вручную»", "Copy added to Manual"), BulletinKind.SUCCESS)
     }
 
-    /** Итог проверки узла ядром, как ConfigValidator.Outcome на macOS. */
     sealed interface NodeCheck {
         data object Ok : NodeCheck
-        /** Ядро отказалось — его собственными словами. */
+
         data class Failed(val message: String) : NodeCheck
-        /** Ядра нет на устройстве: проверить нечем. */
+
         data object Unavailable : NodeCheck
     }
 
-    /** Прогоняет узел через ядро, которое его запустит, не поднимая туннель. */
     suspend fun checkNode(node: ProxyConfig): NodeCheck {
         dev.local.veil.core.NodeRepresentation.missingCredential(node)?.let { (ru, en) ->
             return NodeCheck.Failed(tr(ru, en))
@@ -765,22 +761,13 @@ class VeilState(
         )
     }
 
-    /**
-     * Пишет изменённый узел поверх узла с тем же id. Id сохраняет
-     * [dev.local.veil.core.NodeRepresentation.parse], поэтому группы, правила
-     * и пометки, которые его называют, его находят.
-     */
     fun replaceServer(node: ProxyConfig) {
         servers = servers.map { if (it.id == node.id) node else it }
         container.store.save(servers)
     }
 
-    /* ---------------- перенос между устройствами ---------------- */
-
-    /** Телевизор или приставка: камеры нет, подписки приходят с телефона. */
     val isTv: Boolean = container.transfer.isTelevision
 
-    /** Адрес приёма из отсканированного QR — ждёт подтверждения пользователя. */
     var pendingPairing by mutableStateOf<String?>(null)
         private set
 
@@ -788,7 +775,6 @@ class VeilState(
         pendingPairing = null
     }
 
-    /** Ход переноса подписок: окно поверх всего, чтобы его не закрыли на полпути. */
     sealed interface TransferProgress {
         data class Sending(val subscriptions: Int, val servers: Int) : TransferProgress
         data class Receiving(val done: Int, val total: Int) : TransferProgress
@@ -802,10 +788,8 @@ class VeilState(
         if (transferProgress is TransferProgress.Finished) transferProgress = null
     }
 
-    /** Открывает приём на этом устройстве; вызывающий обязан закрыть сессию. */
     fun startReceiving(): ReceiveSession? = container.transfer.startReceiving { receiveTransfer(it) }
 
-    /** Пришло с другого устройства: подписки скачиваются, серверы добавляются. */
     fun receiveTransfer(payload: TransferPayload) {
         scope.launch {
             busy = true
@@ -836,11 +820,6 @@ class VeilState(
         }
     }
 
-
-    /**
-     * Отправляет на приставку из QR то, что человек отметил: выбранные
-     * подписки и, если отмечено, серверы, добавленные вручную.
-     */
     fun confirmTransfer(subscriptionUrls: Set<String>, manualServers: Boolean) {
         val address = pendingPairing ?: return
         pendingPairing = null
@@ -876,8 +855,6 @@ class VeilState(
             busy = false
         }
     }
-
-    /* ---------------- ссылки и «Поделиться» ---------------- */
 
     fun linkFor(server: ProxyConfig): String? = ShareLink.encode(server)
 
@@ -918,6 +895,7 @@ class VeilState(
     }
 
     fun removeSubscription(subscription: Subscription) {
+        saveSettings(settings.copy(groups = settings.groups.filterNot { it.source == subscription.url }))
         servers = servers.filterNot { it.source == subscription.url }
         subscriptions = subscriptions.filterNot { it.url == subscription.url }
         container.store.save(servers)
@@ -942,36 +920,17 @@ class VeilState(
         }
         body as SubscriptionPayload.Body.Ok
 
-        var base = if (replaceSource && source != null) {
-            servers.filterNot { it.source == source }
-        } else {
-            servers
-        }
-
-        val incoming = body.nodes.mapTo(HashSet()) { it.dedupKey() }
-
-        // Ноды, добавленные до появления подписок, привязываем к ней,
-        // иначе они навсегда останутся в «Вручную».
-        if (source != null) {
-            base = base.map { server ->
-                if (server.source == null && server.dedupKey() in incoming) {
-                    server.copy(source = source)
-                } else {
-                    server
-                }
-            }
-        }
-
-        val known = base.mapTo(HashSet()) { it.dedupKey() }
-        val fresh = body.nodes
-            .filterNot { it.dedupKey() in known }
-            .map { it.copy(source = source) }
-
-        val added = fresh.size
-        val next = base + fresh
+        val next = dev.local.veil.core.mergeImportedNodes(servers, body.nodes, source, replaceSource)
+        val previousIds = servers.mapTo(HashSet()) { it.id }
+        val added = next.count { it.id !in previousIds }
 
         servers = next
         container.store.save(next)
+        if (body.format == SubscriptionPayload.Format.MIHOMO || (replaceSource && source != null)) {
+            saveSettings(settings.copy(groups = dev.local.veil.core.mergeImportedGroups(
+                settings.groups, body.groups, source, body.nodes, next,
+            )))
+        }
 
         if (source != null) {
             val existing = subscriptions.firstOrNull { it.url == source }
@@ -998,7 +957,7 @@ class VeilState(
                 lastFormat = body.format.label,
                 skipped = body.skipped,
             )
-            // Обновление не должно двигать источник в конец списка.
+
             subscriptions = if (existing != null) {
                 subscriptions.map { if (it.url == source) entry else it }
             } else {
@@ -1007,7 +966,7 @@ class VeilState(
             container.store.saveSubscriptions(subscriptions)
         }
 
-        if (selectedId == null) {
+        if (next.none { it.id == selectedId }) {
             selectedId = (next.firstOrNull { !it.isPlaceholder } ?: next.firstOrNull())?.id
             container.store.saveSelectedId(selectedId)
         }
@@ -1027,18 +986,17 @@ class VeilState(
         return null
     }
 
-    /* ---------------- подключение ---------------- */
-
     fun toggleTunnel(status: VpnStatus) {
         when (status.phase) {
             VpnPhase.CONNECTED -> scope.launch { container.vpn.disconnect() }
-            VpnPhase.PAUSED -> scope.launch { container.vpn.resume() }
+            VpnPhase.PAUSED -> connect()
             VpnPhase.CONNECTING -> Unit
             VpnPhase.DISCONNECTED, VpnPhase.ERROR -> connect()
         }
     }
 
     private fun connect() {
+        dev.local.veil.core.AppLog.event("Connection requested")
         if (connectJob?.isActive == true) return
         val server = selected
         if (server == null) {
@@ -1061,7 +1019,6 @@ class VeilState(
         connectJob = scope.launch {
             val options = tunnelOptions()
 
-            // Подключаемся сразу к выбранному узлу, без предварительных проверок.
             val target = server
             container.vpn.connect(target, options).onFailure {
                 showBulletin(it.message ?: tr("Не удалось подключиться", "Could not connect"), BulletinKind.ERROR)
@@ -1069,7 +1026,6 @@ class VeilState(
         }
     }
 
-    /** Кнопка «Проверить соединение» в настройках. */
     fun checkConnection() {
         val server = selected
         if (server == null) {
@@ -1112,8 +1068,6 @@ class VeilState(
         }
     }
 
-    /* ---------------- обновления ---------------- */
-
     fun checkUpdates() {
         scope.launch {
             updateProgress = null
@@ -1127,7 +1081,7 @@ class VeilState(
                 }
                 .onFailure {
                     val text = it.message ?: tr("Не удалось проверить обновления", "Could not check for updates")
-                    // Отсутствие релизов — не ошибка, а факт.
+
                     val kind = if (text.contains("Релизов")) BulletinKind.INFO else BulletinKind.ERROR
                     showBulletin(text, kind)
                 }
@@ -1172,10 +1126,8 @@ class VeilState(
     }
 }
 
-/** Тип всплывающего сообщения: от него зависит цвет и время показа. */
 enum class BulletinKind { INFO, SUCCESS, ERROR }
 
 data class Bulletin(val id: Long, val text: String, val kind: BulletinKind)
 
-/** Локальное время без зависимостей: для отметки «когда обновляли». */
 expect fun currentTimeMillis(): Long

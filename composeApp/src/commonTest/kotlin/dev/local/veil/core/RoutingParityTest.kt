@@ -16,10 +16,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/**
- * Порт RoutingRuleOrderTests.swift и маршрутной части SingBoxProfileTests.swift
- * из veil-macos: порядок правил, MatcherSyntax и рендер в оба ядра.
- */
 class RoutingParityTest {
 
     private val node = ProxyConfig(
@@ -40,8 +36,6 @@ class RoutingParityTest {
     )
 
     private fun List<RoutingRule>.indexOfName(name: String) = indexOfFirst { it.name == name }
-
-    /* ---------------- порядок ---------------- */
 
     @Test
     fun userRulesApplyUnderEveryPreset() {
@@ -161,7 +155,6 @@ class RoutingParityTest {
         assertEquals(listOf(RU_INSIDE_LIST), ru.communityLists)
         assertEquals(RuleTarget.Direct, ru.communityListTarget)
 
-        // Список уже включён: не дублируется, выбранная цель не трогается.
         val kept = AppSettings(
             settingsVersion = 2,
             routingPreset = RoutingPreset.BYPASS_RU,
@@ -201,7 +194,7 @@ class RoutingParityTest {
         val migrated = AppSettings(communityListTarget = RuleTarget.Proxy).migrated()
         assertEquals(RuleTarget.Direct, migrated.communityListTarget)
         assertEquals(2, migrated.settingsVersion)
-        // После миграции явный выбор прокси больше не перезаписывается.
+
         assertEquals(
             RuleTarget.Proxy,
             migrated.copy(communityListTarget = RuleTarget.Proxy).migrated().communityListTarget,
@@ -218,8 +211,6 @@ class RoutingParityTest {
         assertEquals(RuleTarget.server("n1"), decoded.customRules.single().target)
         assertEquals(RoutingPreset.BYPASS_RU, decoded.routingPreset)
     }
-
-    /* ---------------- MatcherSyntax ---------------- */
 
     @Test
     fun portRangesAcceptBothSeparatorsAndOpenEnds() {
@@ -239,8 +230,6 @@ class RoutingParityTest {
     fun xrayPortsUseDashes() {
         assertEquals("443,1000-2000,1-1024", MatcherSyntax.xrayPorts("443, 1000:2000, :1024"))
     }
-
-    /* ---------------- sing-box ---------------- */
 
     private fun route(rule: RoutingRule): JsonObject? = SingboxConfig.routeRule(rule)
 
@@ -301,7 +290,7 @@ class RoutingParityTest {
         assertEquals("proxy", route["final"]?.jsonPrimitive?.content)
         val tags = (route["rule_set"] as JsonArray).map { it.jsonObject["tag"]!!.jsonPrimitive.content }
         assertTrue("geosite-category-ru" in tags && "geoip-ru" in tags)
-        // Устаревших для 1.12 полей нет.
+
         val outbounds = (config["outbounds"] as JsonArray).map { it.jsonObject["type"]!!.jsonPrimitive.content }
         assertFalse("dns" in outbounds)
         val tun = (config["inbounds"] as JsonArray)[0].jsonObject
@@ -347,8 +336,6 @@ class RoutingParityTest {
         assertEquals(listOf("srv-a", "srv-b"), selector.strings("outbounds"))
         assertEquals("srv-b", selector["default"]?.jsonPrimitive?.content)
     }
-
-    /* ---------------- Xray ---------------- */
 
     private fun xrayRules(options: TunnelOptions): List<JsonObject> {
         val config = XrayConfig.build(node, options)
@@ -431,7 +418,7 @@ class RoutingParityTest {
         assertEquals(true, cache["enabled"]?.jsonPrimitive?.boolean)
         val sets = (config["route"]!!.jsonObject["rule_set"] as JsonArray).map { it.jsonObject }
         assertTrue(sets.all { it["download_detour"]?.jsonPrimitive?.content == "proxy" })
-        // Без секрета Clash API не поднимается, даже если правило просит режим.
+
         assertNull(config["experimental"]!!.jsonObject["clash_api"])
     }
 
@@ -440,7 +427,7 @@ class RoutingParityTest {
         val versioned = dev.local.veil.AppVersion.USER_AGENT
         assertEquals("Veil/${dev.local.veil.AppVersion.NAME}", versioned)
         assertEquals(versioned, AppSettings().effectiveUserAgent)
-        // Старая сборка сохранила своё значение по умолчанию — это не выбор пользователя.
+
         val legacy = AppSettings(userAgent = "Veil/0.1").migrated()
         assertEquals("", legacy.userAgent)
         assertEquals(versioned, legacy.effectiveUserAgent)

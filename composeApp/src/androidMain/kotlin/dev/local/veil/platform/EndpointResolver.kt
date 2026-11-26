@@ -9,23 +9,11 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/**
- * Подставляет IP вместо доменных имён серверов в готовом конфиге Xray.
- *
- * Зачем: Go-резолвер внутри Android-процесса не видит netd и не умеет
- * спрашивать DNS — `dialing to tcp:node.example.com:443` висит вечно,
- * туннель поднимается, но трафика нет. Java-резолвер (`InetAddress`)
- * работает через netd штатно, поэтому имена резолвим здесь, а в конфиг
- * отдаём уже IP. SNI, Host-заголовок и REALITY serverName не трогаем:
- * они живут в отдельных полях и остаются доменом.
- */
 object EndpointResolver {
     private const val TAG = "VeilXray"
 
-    /** host → ip или null, если не разрешился. Живёт до перезапуска процесса. */
     private val cache = HashMap<String, String?>()
 
-    /** «Уже IP» — резолвить не нужно. */
     fun isIpLiteral(host: String): Boolean {
         val h = host.removePrefix("[").removeSuffix("]")
         if (h.isEmpty()) return false
@@ -50,7 +38,6 @@ object EndpointResolver {
         return ip
     }
 
-    /** Заменяет все доменные адреса серверов на IP. Возвращает тот же JSON. */
     fun apply(configJson: String): String {
         val doc = runCatching { Json.parseToJsonElement(configJson) }.getOrNull() ?: return configJson
         var changed = false
@@ -60,13 +47,13 @@ object EndpointResolver {
                 val result = LinkedHashMap<String, JsonElement>()
                 element.forEach { (key, value) ->
                     val replaced = when {
-                        // vnext[].address, servers[].address — адрес узла.
+
                         key == "address" && value is JsonPrimitive && value.isString -> {
                             val ip = resolveHost(value.content)
                             if (ip != null) changed = true
                             ip?.let { JsonPrimitive(it) } ?: value
                         }
-                        // WireGuard: peers[].endpoint = "host:port" / "[v6]:port".
+
                         key == "endpoint" && value is JsonPrimitive && value.isString -> {
                             resolveEndpointString(value.content)?.let { changed = true; JsonPrimitive(it) } ?: value
                         }
@@ -94,12 +81,10 @@ object EndpointResolver {
         return endpoint.replace(host, ip)
     }
 
-    /** Домены серверов, которые не удалось разрешить (для сообщения пользователю). */
     fun unresolvedHosts(configJson: String): List<String> = serverHosts(configJson).filter { host ->
         synchronized(cache) { cache[host] } == null
     }
 
-    /** Все доменные адреса серверов в конфиге. */
     fun serverHosts(configJson: String): List<String> {
         val doc = runCatching { Json.parseToJsonElement(configJson) as? JsonObject }.getOrNull() ?: return emptyList()
         val outbounds = doc["outbounds"] as? JsonArray ?: return emptyList()

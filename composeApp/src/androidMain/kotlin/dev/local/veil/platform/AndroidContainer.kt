@@ -37,8 +37,6 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
-// HTTPS, а не HTTP: при targetSdk 28+ Android запрещает cleartext-запросы,
-// и проверка падала бы на любом узле.
 private const val PROBE_URL = "https://www.gstatic.com/generate_204"
 
 class AndroidVpnController(
@@ -52,7 +50,6 @@ class AndroidVpnController(
         (activity.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
             Configuration.UI_MODE_TYPE_TELEVISION
 
-    /** Слабое устройство: реже опрашиваем счётчики, чтобы не греть CPU. */
     private val isLowRamAndroid =
         (activity.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
             ?.isLowRamDevice == true
@@ -68,14 +65,13 @@ class AndroidVpnController(
         get() {
             val singbox = SingboxBridge.version()?.let { "sing-box $it" }
             val xray = XrayBridge.version()?.let { "Xray $it" }
-            // Показываем ядро, которым реально поднят туннель.
+
             return if (activeEngine == CoreEngine.SING_BOX) singbox ?: xray else xray ?: singbox
         }
 
     private var pollJob: Job? = null
     private var pendingPermission: CompletableDeferred<Boolean>? = null
 
-    /** Ядро текущего туннеля — от него зависят счётчики трафика. */
     private var activeEngine: CoreEngine = CoreEngine.XRAY
 
     private val permissionLauncher =
@@ -85,13 +81,11 @@ class AndroidVpnController(
         }
 
     init {
-        // libbox требует basePath до первого newService; ставим его сразу,
-        // чтобы работали и туннель, и пробное ядро.
+
         runCatching { singbox.Singbox.install(activity.applicationContext) }
         activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
-                // Счётчики нужны только видимому экрану: в фоне опрос раз в
-                // секунду будил бы процесс и ядро.
+
                 _foreground.value = true
                 if (_status.value.isConnected) startPolling()
             }
@@ -109,7 +103,6 @@ class AndroidVpnController(
         }
     }
 
-    /** Секрет Clash API sing-box: новый на каждый запуск, как на macOS. */
     private val clashSecret: String =
         java.math.BigInteger(128, java.security.SecureRandom()).toString(16)
 
@@ -131,7 +124,6 @@ class AndroidVpnController(
             }
             if (!ensurePermission()) error("Разрешение на VPN не выдано")
 
-            // Каждая новая сессия начинается с чистого лога.
             if (logFile.isNotEmpty()) prepareLog(engine, logFile)
             activeEngine = engine
 
@@ -149,13 +141,11 @@ class AndroidVpnController(
             )
         }
 
-    /** Есть ли в каталоге ядра geoip.dat и geosite.dat. */
     private fun hasGeoAssets(): Boolean {
         fun present(name: String) = java.io.File(geoDirectory, name).let { it.exists() && it.length() > 0 }
         return present("geoip.dat") && present("geosite.dat")
     }
 
-    /** Каким ядром поднимать узел: AUTO выбирает по протоколу и транспорту. */
     private fun engineFor(server: ProxyConfig, options: TunnelOptions): CoreEngine =
         options.coreEngine.resolve(server)
 
@@ -163,10 +153,22 @@ class AndroidVpnController(
         server: ProxyConfig,
         options: TunnelOptions,
         engine: CoreEngine,
-    ): String = when (engine) {
-        // Резолвер понимает только форму Xray; sing-box пока получает конфиг как есть.
+    ): String {
+        if (engine == CoreEngine.XRAY) {
+            val activeRules = options.rules.filter { it.enabled && it.hasMatcher }
+            require(activeRules.none { it.xrayRule() == null }) {
+                "В правилах есть условия, которые Xray не поддерживает. Уберите условия приложений, rule-set или инверсию."
+            }
+            require(options.geoAvailable || activeRules.none { rule ->
+                rule.domains.any { it.startsWith("geosite:", ignoreCase = true) && it != "geosite:private" } ||
+                    rule.ips.any { it.startsWith("geoip:", ignoreCase = true) && it != "geoip:private" }
+            }) { "Геобазы ещё не загружены. Откройте «Маршрут» → «Геобазы» и завершите загрузку." }
+        }
+        return when (engine) {
+
         CoreEngine.SING_BOX -> SingboxConfig.build(server, options).toString()
         else -> resolveEndpoints(XrayConfig.json(server, options))
+    }
     }
 
     private fun prepareLog(engine: CoreEngine, path: String) {
@@ -179,13 +181,8 @@ class AndroidVpnController(
     private fun downTotal(): Long =
         if (activeEngine == CoreEngine.SING_BOX) SingboxBridge.downlinkTotal() else XrayBridge.downlinkTotal()
 
-    /** Пробное ядро одно на всё приложение, поэтому проверки идут строго по очереди. */
     private val probeMutex = Mutex()
 
-    /**
-     * Поднимает второй экземпляр ядра с локальным SOCKS под одноразовым паролем,
-     * отдаёт порт блоку и гасит ядро. Рабочий туннель продолжает жить.
-     */
     private suspend fun <T> withProbeCore(
         server: ProxyConfig,
         options: TunnelOptions,
@@ -193,21 +190,18 @@ class AndroidVpnController(
     ): T? = probeMutex.withLock {
         withContext(Dispatchers.IO) {
             if (!coreAvailable) return@withContext null
-            // Пробное ядро пишет в отдельный файл: два экземпляра в одном
-            // файле мешали бы друг другу.
+
             val probeLog = logFile.takeIf { it.isNotEmpty() }?.let { "$it.probe" }
             val effective = options.forProbe().copy(
                 logFile = probeLog,
-                // Пинг списка поднимает ядро на каждый узел: debug писал бы
-                // сотни строк на диск за проход. Ошибки warning всё равно видны.
+
                 logLevel = "warning",
                 geoAvailable = hasGeoAssets(),
             )
             val engine = engineFor(server, effective)
             if (engine == CoreEngine.SING_BOX && !SingboxBridge.available) return@withContext null
             val port = 21000 + (System.nanoTime() % 500).toInt()
-            // Одноразовый логин/пароль: пока идёт проверка, чужое приложение
-            // на телефоне не сможет пустить трафик через этот SOCKS.
+
             val rnd = java.security.SecureRandom()
             val user = "p" + java.math.BigInteger(64, rnd).toString(16)
             val pass = java.math.BigInteger(128, rnd).toString(16)
@@ -252,19 +246,17 @@ class AndroidVpnController(
     }
 
     override suspend fun probe(server: ProxyConfig, options: TunnelOptions): Boolean =
-        // Один редкий обрыв не должен отменять переключение: вторая попытка
-        // идёт по свежему соединению.
+
         withProbeCore(server, options) { port ->
             requestThroughSocks(port, 5000) != null || requestThroughSocks(port, 5000) != null
         } ?: false
 
     override suspend fun realPing(server: ProxyConfig, options: TunnelOptions, timeoutMs: Int): Int? =
         withProbeCore(server, options) { port ->
-            // Первый запрос платит за старт ядра, DNS, TCP и TLS — это не пинг,
-            // он только проверяет, что узел живой.
+
             val cold = requestThroughSocks(port, timeoutMs) ?: requestThroughSocks(port, timeoutMs)
                 ?: return@withProbeCore null
-            // Следующие идут по уже открытому соединению: чистый RTT пути.
+
             val warm = listOfNotNull(
                 requestThroughSocks(port, timeoutMs),
                 requestThroughSocks(port, timeoutMs),
@@ -272,12 +264,6 @@ class AndroidVpnController(
             warm.minOrNull() ?: cold
         }
 
-    /**
-     * Реальный пинг пачкой, как ProxyProbe на macOS: одно пробное ядро на
-     * [dev.local.veil.core.PingBatch.CHUNK] узлов, по SOCKS-входу на узел,
-     * запросы параллельно. Узлы с готовым конфигом из подписки мерятся по
-     * одному — у них своя топология выходов.
-     */
     override suspend fun realPingBatch(
         servers: List<ProxyConfig>,
         options: TunnelOptions,
@@ -349,7 +335,7 @@ class AndroidVpnController(
                         nodes.mapIndexed { index, node ->
                             async {
                                 semaphore.withPermit {
-                                    // Первый запрос платит за рукопожатие, второй — чистый RTT.
+
                                     val cold = requestThroughSocks(ports[index], timeoutMs)
                                     val ms = if (cold == null) null else requestThroughSocks(ports[index], timeoutMs) ?: cold
                                     report(node.id, ms)
@@ -371,7 +357,6 @@ class AndroidVpnController(
         if (results == null) nodes.forEach { report(it.id, null) }
     }
 
-    /** Свободные порты loopback: сокеты держим, пока не выбраны все, чтобы порты не повторились. */
     private fun freeLoopbackPorts(count: Int): List<Int> {
         val sockets = ArrayList<java.net.ServerSocket>()
         return try {
@@ -397,10 +382,6 @@ class AndroidVpnController(
         }
     }
 
-    /**
-     * Запрос через локальный SOCKS. Возвращает время до ответа в мс,
-     * null — не получилось. Любой HTTP-ответ значит, что узел живой.
-     */
     private fun requestThroughSocks(port: Int, timeoutMs: Int): Int? = runCatching {
         val proxy = java.net.Proxy(
             java.net.Proxy.Type.SOCKS,
@@ -414,8 +395,7 @@ class AndroidVpnController(
         connection.requestMethod = "GET"
         val code = connection.responseCode
         val elapsed = ((System.nanoTime() - started) / 1_000_000L).toInt()
-        // Дочитываем ответ и не вызываем disconnect(): соединение возвращается
-        // в пул, и следующий замер идёт без рукопожатия.
+
         runCatching { (connection.errorStream ?: connection.inputStream).use { it.readBytes() } }
         if (code > 0) elapsed.coerceAtLeast(1) else null
     }.onFailure { android.util.Log.w("VeilXray", "запрос через узел не прошёл: ${it.message}") }
@@ -429,10 +409,6 @@ class AndroidVpnController(
         VeilVpnService.togglePause(activity.applicationContext)
     }
 
-    /**
-     * Смена сервера. Если туннель уже поднят — перезапускаем только ядро,
-     * TUN и его дескриптор остаются на месте (аналог iOS `reload`).
-     */
     override suspend fun reconnect(server: ProxyConfig, options: TunnelOptions): Result<Unit> =
         runCatching {
             if (!coreAvailable) error("ядро не подключено к сборке")
@@ -483,14 +459,10 @@ class AndroidVpnController(
         if (_status.value.phase == VpnPhase.ERROR) VeilVpnService.reset()
     }
 
-    /**
-     * Go-резолвер в Android-процессе не работает (нет /etc/resolv.conf),
-     * поэтому домены узлов превращаем в IP ещё до передачи конфига ядру.
-     */
     private suspend fun resolveEndpoints(configJson: String, dump: Boolean = true): String =
         withContext(Dispatchers.IO) {
         val resolved = EndpointResolver.apply(configJson)
-        // Конфиг рядом с логом: по нему видно, что реально ушло в ядро.
+
         if (dump && logFile.isNotEmpty()) runCatching {
             val file = java.io.File(logFile)
             file.parentFile?.mkdirs()
@@ -517,8 +489,7 @@ class AndroidVpnController(
             var lastDown = 0L
             var lastAt = 0L
             while (isActive) {
-                // На ТВ и слабых телефонах скорость счётчиков не нужна каждую
-                // секунду: более редкий тик заметно снижает лишние перерисовки.
+
                 delay(
                     when {
                         isTelevision -> 2000
@@ -528,7 +499,7 @@ class AndroidVpnController(
                 )
                 val up = upTotal()
                 val down = downTotal()
-                val now = System.currentTimeMillis()
+                val now = android.os.SystemClock.elapsedRealtime()
                 val seconds = if (lastAt == 0L) 1.0
                 else ((now - lastAt) / 1000.0).coerceAtLeast(0.2)
                 val upSpeed = if (lastAt == 0L) 0L
@@ -601,7 +572,6 @@ class AndroidServerStore(context: Context) : ServerStore {
 class AndroidLogProvider(private val file: java.io.File) : LogProvider {
     override val path: String get() = file.absolutePath
 
-    /** Пробное ядро пишет рядом, в свой файл: два ядра в одном файле мешали бы друг другу. */
     private val checks = java.io.File(file.path + ".probe")
 
     override suspend fun read(): String = tail(file)
@@ -616,7 +586,6 @@ class AndroidLogProvider(private val file: java.io.File) : LogProvider {
         runCatching { checks.writeText("") }
     }
 
-    /** Хвост файла: пустой файл — пустая строка, экран сам скажет, что логов нет. */
     private suspend fun tail(source: java.io.File): String = withContext(Dispatchers.IO) {
         runCatching {
             if (!source.exists()) return@runCatching ""
@@ -626,9 +595,24 @@ class AndroidLogProvider(private val file: java.io.File) : LogProvider {
 }
 
 class AndroidContainer(activity: ComponentActivity) : AppContainer {
+    override val sharing = dev.local.veil.sharing.AndroidInternetSharing.get(activity.applicationContext)
+    override val openNotificationSettings: () -> Unit = {
+        val settingsIntent = android.content.Intent(
+            if (android.os.Build.VERSION.SDK_INT >= 36) "android.settings.APP_NOTIFICATION_PROMOTION_SETTINGS"
+            else android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+        ).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        try {
+            activity.startActivity(settingsIntent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            activity.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(android.net.Uri.parse("package:${activity.packageName}")),
+            )
+        }
+    }
+
     private val geoDir = File(activity.filesDir, "geo").apply { mkdirs() }.absolutePath
-    // Лог ядра — во внешнем каталоге приложения: adb читает его без run-as
-    // (run-as на этом устройстве падает на SELinux).
+
     private val logPath = File(
         activity.getExternalFilesDir(null) ?: activity.filesDir,
         "xray.log",
@@ -644,7 +628,7 @@ class AndroidContainer(activity: ComponentActivity) : AppContainer {
                 if (SingboxBridge.available) SingboxBridge.checkConfig(configJson) else return null
             else -> if (XrayBridge.available) XrayBridge.checkConfig(configJson) else return null
         }
-        // Мост зовёт ядро через reflection: настоящая причина лежит внутри.
+
         return result.recoverCatching { error ->
             throw (error as? java.lang.reflect.InvocationTargetException)?.targetException ?: error
         }

@@ -29,7 +29,8 @@
 
 <p align="center">
   <a href="README.md">English</a> ·
-  <a href="README.ru.md">Русский</a>
+  <a href="README.ru.md">Русский</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 ---
@@ -42,13 +43,31 @@ protocol — no manual core switch. Material 3 Expressive UI, subscription profi
 connect, real node verification with automatic failover, phone-to-TV transfer, and a tunnel
 with no tun2socks and no extra hops in the data path.
 
-> **Status: alpha (`0.1.0-alpha`).** Tested on a physical Samsung Galaxy S20 FE with live
-> VLESS/REALITY subscriptions. Both engines are bundled. Expect rough edges.
+> **Version: `0.3.0` (active development).** Local release builds have been installed on a physical
+> Samsung SM-S916B. Earlier testing used a Galaxy S20 FE with live VLESS/REALITY
+> subscriptions. Both engines are bundled; not every protocol or UI gesture has been
+> verified on a device. See the [0.3.0 release notes](docs/releases/v0.3.0.md) in English and Russian.
 
 > **Disclaimer.** Veil is a client for proxy protocols intended for privacy, development,
 > and lawful circumvention of censorship. You are responsible for complying with the laws
 > and terms of service that apply to you. The bundled core is third-party software under
 > its own licence.
+
+## Development updates
+
+- Experimental [internet sharing](docs/internet-sharing.md) through Shizuku or an
+  authenticated proxy. Active sharing retains the hotspot and credentials during
+  VPN server/core switches; traffic pauses briefly. Disconnect, pause or VPN failure
+  stops sharing. Reconnection behavior still needs hardware validation.
+- Android TV: server action buttons for remotes, improved text scrolling, focus
+  entry in settings and theme-colored screen margins. ARMv7 builds have been
+  installed on an Android 11 TV box; final visual validation is pending.
+- Subscription refresh preserves stable node IDs, isolates sources and updates
+  imported groups. Translation dictionaries load on demand; unchanged logs skip
+  repeated masking, with masking performed off the UI thread.
+- Release APKs use code/resource shrinking and ABI splits. Optional extra ZIP
+  compression via `Scripts/recompress-apk.py` produces an **unsigned** APK that
+  must be aligned and signed again; gains are modest because native cores dominate.
 
 ## Install
 
@@ -56,11 +75,12 @@ Grab an APK from the [latest release](https://github.com/The-Veil-Foundation/vei
 
 | File | For |
 | --- | --- |
+| `veil-<version>-armeabi-v7a.apk` | 32-bit ARMv7 phones and Android TV boxes |
 | `veil-<version>-arm64-v8a.apk` | phones and most Android TV boxes — the one you need |
 | `veil-<version>-x86_64.apk` | emulators and x86 devices |
 
 Allow installing from unknown sources when Android asks. Requires Android 7.0 (API 24) or
-later; 32-bit devices are not supported. The app checks GitHub Releases for updates
+later; 32-bit ARMv7 devices are supported. The app checks GitHub Releases for updates
 itself (*Settings → Check for updates*).
 
 ## Features
@@ -80,11 +100,16 @@ against live servers yet (the test subscription contained none).
 ### Subscriptions
 
 - Plain share links, base64 lists, ready-made Xray config arrays and **Mihomo / Clash YAML**
-  (`proxies:` imported as nodes; groups and rules are not used yet).
+  (`proxies:` plus simple `select` / `url-test` groups). Nested groups, built-in
+  `DIRECT`/`REJECT` members and provider/filter-based groups are reported as unsupported;
+  Mihomo routing rules are not imported. Imported groups are available in Routing → Groups;
+  importing them does not automatically change your default route.
 - **Happ** (`happ://`) and **INCY** (`incy://`) share links.
 - Xray configs with a balancer show how many outbounds the panel folded into the node.
 - Manual, per-group and scheduled refresh.
 - Reads `subscription-userinfo`, so each subscription card shows traffic used and expiry.
+- Rename servers and subscriptions from their action sheets. Custom names are stored
+  separately from panel data and retained across subscription refreshes.
 
 ### Node verification and failover
 
@@ -108,6 +133,11 @@ against live servers yet (the test subscription contained none).
 
 - **Share links and QR codes** for any node, rebuilt from its config (`ShareLink`, the inverse
   of the parser).
+- **QR from image** — Add → QR from image opens Android's file picker. The decoded text
+  is placed in the input for review; nothing is imported or fetched until you confirm.
+  Supports normal, inverted and transparent-background QR images. Files are limited to
+  16 MB and downsampled to at most 2048 pixels per side; crop around small codes if needed.
+  Does not require camera or broad gallery access.
 - **Phone → TV transfer.** The TV box shows a QR with its LAN address; the phone scans it and
   sends its subscriptions and manual servers over the local network. Only private
   (`10/8`, `172.16/12`, `192.168/16`) addresses are accepted, so a forged QR cannot make the
@@ -123,6 +153,8 @@ against live servers yet (the test subscription contained none).
 - **IPv6** in the tunnel or around it, adjustable **MTU**.
 - **RU bypass** — `.ru` / `.su` / `.рф` go direct.
 - **DPI fragmentation** — TLS ClientHello fragmentation via Xray `finalmask`.
+- **Routing and DNS editors** — presets, ordered rules, server groups, community lists
+  and geo-database management. Engine-specific behavior still needs broader device testing.
 
 ### Everything else
 
@@ -130,13 +162,26 @@ against live servers yet (the test subscription contained none).
   navigation bar in portrait that becomes a side rail in landscape and on TV. Content is kept
   clear of display cutouts.
 - **Live UI** — download/upload speed, session time, pulsing connection state, floating toasts.
-- **Notification** — VPN state and quick actions in the shade.
+- **Cleaner server screen** — animated search, no Veil logo/title in the header, larger
+  button logos and a compact connection card without a duplicate left-hand logo.
+- **Predictive back** — gesture-driven transitions with a previous-screen preview for tabs,
+  routing subpages, subscription details, logs, split tunneling and transfer screens.
+  Uses Android's predictive-back events; gesture behavior still needs device validation.
+- **Settings** — one scrollable list, with app/core logs and a privacy-safe diagnostic summary.
+- **Notification / Live Updates** — session timer, pause/resume and disconnect. Requests an
+  Android 16+ status chip; Samsung Now Bar / ColorOS Live Alerts availability depends on
+  firmware, permissions and OEM eligibility rules. Falls back to a regular notification.
 - **QR scanner** — camera2 + ZXing, no Google Play Services required; autofocus, torch and
   high-resolution analysis for small codes.
 - **Android TV** — launcher entry, banner, full D-pad navigation and a *Receive from another
   device* screen.
 - **Pitch Black** — true-black theme for OLED screens.
-- **Core logs** — in-app viewer with copy and clear.
+- **App and core logs** — separate App, Tunnel and Checks views, filtering, copy and clear.
+  The app log is an in-memory session log, capped at 500 events; it is not a crash archive.
+- **12 language choices** — RU/EN plus the macOS translation tables for Chinese, Spanish,
+  Hindi, Arabic, French, Portuguese, German, Japanese, Indonesian and Turkish. Arabic uses
+  RTL layout. Android-only or dynamic strings without a matching translation fall back to
+  English; see [translation coverage](docs/translations.md).
 - **Over-the-air updates** — straight from GitHub Releases.
 
 ## How it works
@@ -175,7 +220,7 @@ no local SOCKS hop.
 
 ## Build from source
 
-Requires JDK 21 and Android SDK 36. NDK 29 and Go 1.26+ are only needed to rebuild the cores.
+Requires JDK 21 and Android SDK 36. NDK r28c or newer and Go 1.27+ are only needed to rebuild the cores.
 
 ```bash
 git clone https://github.com/The-Veil-Foundation/veil-android.git && cd veil-android
@@ -185,12 +230,22 @@ git clone https://github.com/The-Veil-Foundation/veil-android.git && cd veil-and
 
 The repository ships a prebuilt combined gomobile AAR, `composeApp/libs/veil-core.aar`
 (Xray-core and sing-box libbox merged under one `go.Seq`), so a clean clone builds without Go.
-`Scripts/build-xray-android.sh` rebuilds the Xray part; the libbox part is built with gomobile
-and merged into the same AAR (no script for that is in the repo yet).
+`Scripts/build-core-android.sh` rebuilds both cores together for `armeabi-v7a`,
+`arm64-v8a`, and `x86_64`. Set `ANDROID_HOME` and `ANDROID_NDK_HOME` before running it.
+The dependency versions are pinned in `CoreBridge/go.mod`.
+Go 1.27 builds use `http2legacy` for sing-box's HTTP/2 compatibility and a local QPACK
+adapter for the combined dependency graph. Details: [`CoreBridge/README.md`](CoreBridge/README.md).
 
 ```bash
-./gradlew :composeApp:desktopTest      # 49 tests: links, share links, configs, Mihomo YAML
+./gradlew :composeApp:desktopTest
+./gradlew :composeApp:compileDebugKotlinAndroid
+./gradlew :composeApp:assembleRelease -PabiSplits
 ```
+
+Release APKs are written to `composeApp/build/outputs/apk/release/` as
+`composeApp-<abi>-release.apk`. Published release assets use `veil-<version>-<abi>.apk`.
+Updating an existing installation requires the same signing key; do not uninstall if
+you need to preserve its data.
 
 <details>
 <summary>Releases and signing</summary>
@@ -200,7 +255,7 @@ Releases are built **manually**: *Actions → Release → Run workflow*, with a 
 runs the same way via *Actions → CI*.
 
 ABI splits are enabled with `-PabiSplits`, so a plain `assembleDebug` still builds one APK.
-The core ships only for `arm64-v8a` and `x86_64`.
+The core ships for `armeabi-v7a`, `arm64-v8a`, and `x86_64`.
 
 For a release key set `VEIL_KEYSTORE`, `VEIL_KEYSTORE_PASSWORD`, `VEIL_KEY_ALIAS` and
 `VEIL_KEY_PASSWORD` (or the matching repository secrets); otherwise the debug key is used.
@@ -212,9 +267,15 @@ Step-by-step guide: [`docs/release.md`](docs/release.md) (Russian).
 <details>
 <summary>Logs</summary>
 
-In the app: *Settings → Core logs*. Files live in
+In the app: *Settings → App and core logs*. App events are kept only for the current process.
+Core files live in
 `Android/data/org.veil.app/files/xray.log` and `xray.config.json` and can be pulled with
 `adb` (`run-as` fails on Samsung due to SELinux). The log is truncated on every new connection.
+The log viewer and its copy action mask known credentials, URLs, hosts and IP addresses.
+Original core files and config exports are not rewritten and can still contain secrets.
+Masking is best-effort: review any diagnostic material before sharing.
+*Share diagnostics* exports only aggregate server/protocol counts and the app
+version, not raw logs, profiles, URLs or device IDs.
 
 </details>
 
@@ -231,10 +292,10 @@ In the app: *Settings → Core logs*. Files live in
 | Go bridge | `XrayBridge/xray.go` | ✅ reused + probe instance |
 | UI | `App/Views/*` | ✅ servers, subscriptions, settings, split tunnel, logs, transfer |
 | Share links | — | ✅ `ShareLink`, inverse of the parser |
-| `urltest` groups, Mihomo selectors | — | ⏳ not yet |
-| Routing rules editor, DNS editor | — | ⏳ not yet |
-| Config inspector, secret redaction | — | ⏳ not yet |
-| Localization tables | — | ⏳ not yet |
+| `urltest` groups, selectors | — | Implemented in both builders; simple Mihomo groups imported |
+| Routing rules editor, DNS editor | — | Implemented; cross-engine parity still under review |
+| Config inspector, hidden keys | — | Implemented; viewed/copied logs masked, original files remain raw |
+| Localization tables | — | 12 choices; 5,460 macOS translations imported, Android-specific gaps fall back to English |
 
 More in [`docs/porting.md`](docs/porting.md).
 

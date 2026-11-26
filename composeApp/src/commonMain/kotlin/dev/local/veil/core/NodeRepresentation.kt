@@ -7,25 +7,19 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/**
- * A node written out in the form the user wants to read or edit it in: a port
- * of NodeRepresentation from veil-macos. Each form reads back into a node.
- */
 object NodeRepresentation {
 
     enum class Kind {
-        /** `wg-quick` text with `[Interface]` and `[Peer]`. */
+
         WIREGUARD,
-        /** The outbound its core will actually run. */
+
         JSON,
-        /** The share link. */
+
         LINK,
     }
 
-    /** Why an edit could not be read back, in both interface languages. */
     class Failure(val ru: String, val en: String) : Exception(en)
 
-    /** The forms this node has, the one closest to how it is normally written first. */
     fun kinds(server: ProxyConfig): List<Kind> =
         if (server.proto == ProxyProtocol.WIREGUARD) listOf(Kind.WIREGUARD, Kind.JSON, Kind.LINK)
         else listOf(Kind.JSON, Kind.LINK)
@@ -46,7 +40,6 @@ object NodeRepresentation {
         Kind.WIREGUARD -> wireGuardConf(server)
     }
 
-    /** `wg-quick` text, the form the peer was most likely handed over in. */
     private fun wireGuardConf(server: ProxyConfig): String = buildList {
         add("[Interface]")
         server.privateKey?.let { add("PrivateKey = $it") }
@@ -60,10 +53,6 @@ object NodeRepresentation {
         add("AllowedIPs = ${server.effectiveAllowedIPs.joinToString(", ")}")
     }.joinToString("\n")
 
-    /**
-     * Reads an edited form back into a node, keeping what the form does not
-     * carry: the id above all, so groups, rules and annotations still find it.
-     */
     fun parse(kind: Kind, text: String, original: ProxyConfig): ProxyConfig {
         val parsed: ProxyConfig = when (kind) {
             Kind.LINK -> try {
@@ -85,7 +74,6 @@ object NodeRepresentation {
         )
     }
 
-    /** One outbound, a list of them, or a whole Xray config with `outbounds`. */
     private fun parseJson(text: String, name: String): ProxyConfig {
         val element = runCatching { Json.parseToJsonElement(text) }.getOrNull()
             ?: throw Failure("Это не JSON.", "This is not valid JSON.")
@@ -109,11 +97,6 @@ object NodeRepresentation {
         put("outbounds", outbounds)
     }
 
-    /**
-     * The credential this protocol cannot connect without, when it is absent,
-     * as (ru, en). The cores accept such a node and fail later with a message
-     * about the far end, so it is caught here first.
-     */
     fun missingCredential(server: ProxyConfig): Pair<String, String>? {
         fun blank(value: String?) = value.isNullOrBlank()
         return when (server.proto) {

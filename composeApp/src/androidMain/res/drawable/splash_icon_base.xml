@@ -5,19 +5,19 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:translateX="16.75"
-        android:translateY="16.75"
-        android:scaleX="0.5624"
-        android:scaleY="0.5624">
+        android:translateX="22.2"
+        android:translateY="21.564"
+        android:scaleX="0.48"
+        android:scaleY="0.48">
         <group
             android:name="shield"
             android:pivotX="66.25"
-            android:pivotY="66.25">
+            android:pivotY="67.575">
             <path
-                android:fillColor="#DCE8D5"
+                android:fillColor="@color/splash_foreground"
                 android:pathData="M71.55 14.575L21.2 31.8V64.925C21.2 88.775 34.45 106 53 116.6L60.95 98.05C47.7 90.1 39.75 79.5 39.75 63.6V45.05L64.925 35.775L71.55 14.575Z" />
             <path
-                android:fillColor="#DCE8D5"
+                android:fillColor="@color/splash_foreground"
                 android:pathData="M86.125 19.875L111.3 29.15V63.6C111.3 87.45 98.06 106 70.225 120.575L78.175 94.075C87.45 84.8 92.75 74.2 92.75 62.275V43.725L79.5 38.425L86.125 19.875Z" />
         </group>
     </group>

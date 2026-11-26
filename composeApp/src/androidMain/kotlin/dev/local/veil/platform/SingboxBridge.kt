@@ -2,13 +2,6 @@ package dev.local.veil.platform
 
 import android.util.Log
 
-/**
- * Обёртка над `sing-box.aar` (gomobile-биндинг `singbox.Singbox`).
- *
- * Как и [XrayBridge], работает через рефлексию: пока AAR не подключён к сборке
- * (класса нет), приложение компилируется и живёт на одном Xray. Когда
- * `sing-box.aar` появится в `composeApp/libs`, методы подхватятся без правок.
- */
 object SingboxBridge {
     private const val TAG = "VeilSingbox"
     private const val CLASS_NAME = "singbox.Singbox"
@@ -19,7 +12,6 @@ object SingboxBridge {
 
     val available: Boolean get() = clazz != null
 
-    /** "1.x.y" или null, если AAR не подключён. */
     fun version(): String? = callString("version")
 
     val isRunning: Boolean
@@ -56,7 +48,6 @@ object SingboxBridge {
         }.onFailure { Log.w(TAG, "prepareLog failed", it) }
     }
 
-    /** Второй экземпляр для проверки узла, основной туннель не трогаем. */
     fun startProbe(configJson: String, assetDir: String): Result<Unit> = runCatching {
         val c = clazz ?: error("sing-box.aar не подключён")
         val method = c.methods.firstOrNull { it.name == "startProbe" && it.parameterTypes.size == 2 }

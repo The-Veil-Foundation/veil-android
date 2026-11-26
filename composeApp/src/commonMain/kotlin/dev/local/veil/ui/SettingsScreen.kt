@@ -1,5 +1,10 @@
 package dev.local.veil.ui
 
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -31,7 +36,6 @@ import dev.local.veil.platform.PingMode
 import dev.local.veil.platform.VpnPhase
 import dev.local.veil.platform.VpnStatus
 
-/** Человеческое состояние туннеля для строки «Туннель». */
 private val VpnPhase.label: String
     get() = when (this) {
         VpnPhase.DISCONNECTED -> tr("выключен", "off")
@@ -42,6 +46,7 @@ private val VpnPhase.label: String
     }
 
 @Composable
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 fun SettingsScreen(
     state: VeilState,
     status: VpnStatus,
@@ -50,30 +55,34 @@ fun SettingsScreen(
     onOpenLogs: () -> Unit = {},
     onOpenReceive: () -> Unit = {},
     modifier: Modifier = Modifier,
-    // Живёт выше экрана: подэкраны (раздельный туннель, логи) убирают его из
-    // композиции, и своя позиция прокрутки сбрасывалась бы наверх.
+
     scroll: ScrollState = rememberScrollState(),
 ) {
     val settings = state.settings
+    val entryFocus = remember { FocusRequester() }
     val clipboard = LocalClipboardManager.current
     var showAbout by remember { mutableStateOf(false) }
     var confirmNewHwid by remember { mutableStateOf(false) }
     var editingHwid by remember { mutableStateOf(false) }
+    var choosingLanguage by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .focusProperties {
+                enter = { if (state.isTv) entryFocus else FocusRequester.Default }
+            }
+            .focusGroup()
             .verticalScroll(scroll)
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        /* ---------------- Подключение ---------------- */
-
         SettingsGroup(
             title = tr("Подключение", "Connection"),
             icon = AppIcons.Power,
-            rows = listOf(
+            rows = listOf<@Composable () -> Unit>(
                 {
+                    androidx.compose.foundation.layout.Box(Modifier.focusRequester(entryFocus)) {
                     SegmentSwitch(
                         title = tr("Подключаться при запуске", "Connect on launch"),
                         subtitle = tr("Сразу поднимать туннель к выбранному узлу", "Bring the tunnel up to the selected server"),
@@ -81,6 +90,7 @@ fun SettingsScreen(
                         onCheckedChange = { state.saveSettings(settings.copy(autoConnect = it)) },
                         icon = AppIcons.Power,
                     )
+                    }
                 },
                 {
                     SegmentAction(
@@ -96,17 +106,29 @@ fun SettingsScreen(
                 },
                 {
                     SegmentSwitch(
-                        title = tr("Уведомление в шторке", "Notification in the shade"),
-                        subtitle = tr("Состояние VPN и быстрые действия", "VPN status and quick actions"),
+                        title = tr("Живое уведомление", "Live notification"),
+                        subtitle = if (state.isTv) tr("Таймер подключения в уведомлении VPN", "Connection timer in the VPN notification") else tr(
+                            "Таймер VPN. Системная пилюля — на совместимых устройствах",
+                            "VPN timer. Live chip on supported devices",
+                        ),
                         checked = settings.liveNotification,
                         onCheckedChange = { state.saveSettings(settings.copy(liveNotification = it)) },
                         icon = AppIcons.Bell,
                     )
                 },
+            ) + listOfNotNull<@Composable () -> Unit>(
+                state.openNotificationSettings?.takeUnless { state.isTv }?.let { openSettings ->
+                    @Composable {
+                        SegmentAction(
+                            title = tr("Настройки уведомлений Android", "Android notification settings"),
+                            subtitle = tr("Разрешения и показ живых уведомлений", "Permissions and Live Update visibility"),
+                            icon = AppIcons.Settings,
+                            onClick = openSettings,
+                        )
+                    }
+                },
             ),
         )
-
-        /* ---------------- Обход блокировок ---------------- */
 
         SettingsGroup(
             title = tr("Обход блокировок", "Censorship bypass"),
@@ -123,8 +145,6 @@ fun SettingsScreen(
                 },
             ),
         )
-
-        /* ---------------- Подписки ---------------- */
 
         SettingsGroup(
             title = tr("Подписки", "Subscriptions"),
@@ -186,8 +206,6 @@ fun SettingsScreen(
             ),
         )
 
-        /* ---------------- Устройство (HWID) ---------------- */
-
         SettingsGroup(
             title = tr("Устройство", "Device"),
             icon = AppIcons.Transfer,
@@ -233,8 +251,6 @@ fun SettingsScreen(
             },
         )
 
-        /* ---------------- Оформление ---------------- */
-
         SettingsGroup(
             title = tr("Оформление", "Appearance"),
             icon = AppIcons.Moon,
@@ -261,26 +277,63 @@ fun SettingsScreen(
                     )
                 },
                 {
-                    SegmentChoice(
+                    SegmentAction(
                         title = tr("Язык", "Language"),
-                        subtitle = tr("Язык интерфейса", "Interface language"),
-                        options = dev.local.veil.core.AppLanguage.entries.map { language ->
-                            val label = if (language == dev.local.veil.core.AppLanguage.SYSTEM) {
-                                tr("Системный", "System")
-                            } else {
-                                language.nativeLabel
-                            }
-                            SegmentOption(label, settings.language == language) {
-                                state.saveSettings(state.settings.copy(language = language))
-                            }
-                        },
+                        subtitle = languageTitle(settings.language),
+                        onClick = { choosingLanguage = true },
                         icon = AppIcons.Global,
                     )
                 },
             ),
         )
 
-        /* ---------------- Пинг ---------------- */
+        SettingsGroup(
+            title = tr("Кастомизация", "Customization"),
+            icon = AppIcons.Tuning,
+            rows = listOf<@Composable () -> Unit>(
+                {
+                    SegmentSwitch(
+                        title = tr("Подпись активной вкладки", "Label only the active tab"),
+                        subtitle = tr("В докбаре остальные вкладки показаны иконками", "Other dock tabs show only icons"),
+                        checked = settings.dockActiveLabelOnly,
+                        onCheckedChange = { state.saveSettings(state.settings.copy(dockActiveLabelOnly = it)) },
+                        icon = AppIcons.Layers,
+                    )
+                },
+                {
+                    SegmentSwitch(
+                        title = tr("Свайпы между вкладками", "Swipe between tabs"),
+                        subtitle = tr("Проведите влево или вправо по экрану", "Swipe left or right across the screen"),
+                        checked = settings.swipeTabs,
+                        onCheckedChange = { state.saveSettings(state.settings.copy(swipeTabs = it)) },
+                        icon = AppIcons.ChevronRight,
+                    )
+                },
+                {
+                    SegmentSwitch(
+                        title = tr("Анимация переходов", "Tab transition animation"),
+                        subtitle = tr("Направление движения следует порядку вкладок", "Motion follows the order of the tabs"),
+                        checked = settings.animateTabTransitions,
+                        onCheckedChange = { state.saveSettings(state.settings.copy(animateTabTransitions = it)) },
+                        icon = AppIcons.Layers,
+                    )
+                },
+            ) + listOfNotNull<@Composable () -> Unit>(
+                state.sharing?.let {
+                    @Composable {
+                        SegmentSwitch(
+                            title = tr("Раздача в докбаре", "Sharing in the dock"),
+                            subtitle = tr("Быстрый доступ к Shizuku и прокси", "Quick access to Shizuku and proxy"),
+                            checked = settings.showSharingTab,
+                            onCheckedChange = { state.saveSettings(state.settings.copy(showSharingTab = it)) },
+                            icon = AppIcons.Share,
+                        )
+                    }
+                },
+            ),
+        )
+
+        SharingSettings(state)
 
         SettingsGroup(
             title = tr("Пинг", "Ping"),
@@ -300,8 +353,6 @@ fun SettingsScreen(
                 },
             ),
         )
-
-        /* ---------------- Сеть туннеля ---------------- */
 
         SettingsGroup(
             title = tr("Сеть туннеля", "Tunnel network"),
@@ -342,8 +393,6 @@ fun SettingsScreen(
             ),
         )
 
-        /* ---------------- Диагностика ---------------- */
-
         SettingsGroup(
             title = tr("Диагностика", "Diagnostics"),
             icon = AppIcons.Note,
@@ -358,10 +407,20 @@ fun SettingsScreen(
                 },
                 {
                     SegmentAction(
-                        title = tr("Логи ядра", "Core logs"),
+                        title = tr("Логи приложения и ядра", "App and core logs"),
                         subtitle = tr("Туннель: ${status.phase.label}", "Tunnel: ${status.phase.label}"),
                         onClick = onOpenLogs,
                         icon = AppIcons.Note,
+                    )
+                },
+                {
+                    SegmentAction(
+                        title = tr("Поделиться диагностикой", "Share diagnostics"),
+                        subtitle = tr("Без адресов, ссылок, ключей и логов", "No addresses, links, keys or logs"),
+                        onClick = {
+                            state.share("Veil ${state.appVersion}\n" + dev.local.veil.core.diagnosticSummary(state.servers, state.subscriptions.size))
+                        },
+                        icon = AppIcons.Document,
                     )
                 },
                 {
@@ -383,8 +442,6 @@ fun SettingsScreen(
                 },
             ),
         )
-
-        /* ---------------- О приложении ---------------- */
 
         SettingsGroup(
             title = tr("О приложении", "About"),
@@ -410,6 +467,14 @@ fun SettingsScreen(
         )
 
         Spacer(Modifier.height(20.dp))
+    }
+
+    if (choosingLanguage) {
+        LanguageActionsSheet(
+            selectedLanguage = settings.language,
+            onSelect = { state.saveSettings(state.settings.copy(language = it)) },
+            onDismiss = { choosingLanguage = false },
+        )
     }
 
     if (confirmNewHwid) {
@@ -506,11 +571,6 @@ fun SettingsScreen(
     }
 }
 
-/**
- * Поле со списком через запятую. Текст живёт локально и сохраняется разобранным:
- * иначе каждое нажатие пересобирало бы строку и съедало запятую с пробелом —
- * второй адрес было не ввести.
- */
 @Composable
 private fun ListInput(values: List<String>, label: String, onCommit: (List<String>) -> Unit) {
     var text by remember { mutableStateOf(values.joinToString(", ")) }
@@ -519,18 +579,13 @@ private fun ListInput(values: List<String>, label: String, onCommit: (List<Strin
         onValueChange = { raw ->
             text = raw
             val parsed = raw.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }
-            // Пустой список оставил бы туннель без резолвера — храним последний рабочий.
+
             if (parsed.isNotEmpty()) onCommit(parsed)
         },
         label = label,
     )
 }
 
-/**
- * User-Agent подписки. В поле всегда видно то, что реально уйдёт в запросе.
- * Значение по умолчанию (или пустое поле) хранится как "", чтобы UA шёл за
- * версией приложения; всё остальное — свой выбор пользователя.
- */
 @Composable
 private fun UserAgentInput(stored: String, onCommit: (String) -> Unit) {
     var text by remember { mutableStateOf(dev.local.veil.core.effectiveUserAgent(stored)) }

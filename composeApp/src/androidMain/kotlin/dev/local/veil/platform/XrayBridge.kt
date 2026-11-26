@@ -2,13 +2,6 @@ package dev.local.veil.platform
 
 import android.util.Log
 
-/**
- * Обёртка над `xray.aar` (gomobile-биндинг XrayBridge из veil-ios).
- *
- * Через рефлексию, а не прямыми вызовами: AAR собирается отдельным скриптом,
- * и без него проект всё равно должен компилироваться. Имена методов проверяются
- * один раз при первом обращении.
- */
 object XrayBridge {
     private const val TAG = "VeilXray"
     private const val CLASS_NAME = "xray.Xray"
@@ -19,7 +12,6 @@ object XrayBridge {
 
     val available: Boolean get() = clazz != null
 
-    /** "26.x.y" или null, если AAR не подключён. */
     fun version(): String? = callString("version")
 
     val isRunning: Boolean
@@ -28,7 +20,7 @@ object XrayBridge {
     fun start(configJson: String, tunFd: Int, assetDir: String, maxMemoryMb: Int): Result<Unit> =
         runCatching {
             val c = clazz ?: error("xray.aar не подключён")
-            // gomobile превращает Go int в Java long.
+
             val method = c.methods.firstOrNull { it.name == "start" && it.parameterTypes.size == 4 }
                 ?: error("xray.Xray.start не найден")
             val types = method.parameterTypes
@@ -41,7 +33,7 @@ object XrayBridge {
                     if (types[3] == Long::class.javaPrimitiveType) maxMemoryMb.toLong() else maxMemoryMb,
                 )
             } catch (e: java.lang.reflect.InvocationTargetException) {
-                // Gomobile бросает Exception с текстом ошибки Xray — отдаём его как есть.
+
                 throw e.targetException ?: e
             }
         }
@@ -58,10 +50,6 @@ object XrayBridge {
         }.onFailure { Log.w(TAG, "prepareLog failed", it) }
     }
 
-    /**
-     * Второй экземпляр ядра для проверки узла. Основной туннель при этом
-     * продолжает работать — переключение сервера больше не рвёт соединения.
-     */
     fun startProbe(configJson: String, assetDir: String): Result<Unit> = runCatching {
         val c = clazz ?: error("xray.aar не подключён")
         val method = c.methods.firstOrNull { it.name == "startProbe" && it.parameterTypes.size == 2 }
@@ -93,8 +81,6 @@ object XrayBridge {
         return runCatching { method.invoke(null) as? Long ?: 0L }.getOrDefault(0L)
     }
 
-    // Спидометр читает счётчики раз в секунду: getMethod на каждом тике —
-    // лишняя работа в главном потоке, поэтому ищем методы один раз.
     private val uplinkMethod: java.lang.reflect.Method? by lazy {
         clazz?.let { runCatching { it.getMethod("uplinkTotal") }.getOrNull() }
     }
