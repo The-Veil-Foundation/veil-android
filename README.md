@@ -43,10 +43,10 @@ protocol — no manual core switch. Material 3 Expressive UI, subscription profi
 connect, real node verification with automatic failover, phone-to-TV transfer, and a tunnel
 with no tun2socks and no extra hops in the data path.
 
-> **Status: alpha (`0.2.0-alpha`).** Local release builds have been installed on a physical
+> **Version: `0.3.0` (active development).** Local release builds have been installed on a physical
 > Samsung SM-S916B. Earlier testing used a Galaxy S20 FE with live VLESS/REALITY
 > subscriptions. Both engines are bundled; not every protocol or UI gesture has been
-> verified on a device. See the [changelog](CHANGELOG.md) for unpublished changes.
+> verified on a device. See the [0.3.0 release notes](docs/releases/v0.3.0.md) in English and Russian.
 
 > **Disclaimer.** Veil is a client for proxy protocols intended for privacy, development,
 > and lawful circumvention of censorship. You are responsible for complying with the laws
